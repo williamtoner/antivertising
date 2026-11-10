@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ad</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { font: 14px/1.3 Georgia, serif; }
+  a { display: flex; flex-direction: column; justify-content: center; gap: 6px; height: 100%; padding: 10px 14px;
+      box-sizing: border-box; color: #fff; text-decoration: none; }
+  b { font-size: 20px; }
+  small { opacity: .8; }
+</style>
+<body>
+<script>
+  // Stand-ins for real creatives. The frame URL only carries an id, so the
+  // extension has to read the advertiser out of the ad itself, as it would
+  // on a real page: sometimes from the landing URL, sometimes only from text.
+  var ADS = {
+    burger: { bg: '#b8860b', head: 'I’m lovin’ this deal', body: 'Two Big Mac® sandwiches for the price of one. Today only.',
+              href: 'https://googleads.g.doubleclick.net/pcs/click?xai=AKAOjs&sig=Cg0Ar&adurl=https%3A%2F%2Fwww.mcdonalds.com%2Fus%2Fen-us%2Fdeals.html' },
+    bet:    { bg: '#1b5e20', head: 'Bet $5, get $200 in bonus bets', body: 'New customers only. The sportsbook built for the big game.',
+              href: 'https://ad.doubleclick.net/ddm/trackclk/N1234.5678/B9;dc_trk_aid=1?https://sportsbook.draftkings.com/promo' },
+    shoes:  { bg: '#222', head: 'Run further.', body: 'The new Pegasus is here.',
+              href: 'https://www.nike.com/running' },
+    tv:     { bg: '#141414', head: 'Everyone is talking about it', body: 'New season now streaming. Only on Netflix.',
+              href: 'https://adclick.g.doubleclick.net/aclk?sa=l&ai=Cxyz&num=1&adurl=https://www.netflix.com/title/8675309' },
+    vpn:    { bg: '#0d47a1', head: 'Your ISP can see everything', body: 'Get NordVPN — 68% off + 3 extra months.',
+              href: 'https://go.nordvpn.net/aff_c?offer_id=15&url=https%3A%2F%2Fnordvpn.com%2Foffer' },
+    coin:   { bg: '#0b3d91', head: 'The future of money', body: 'Buy, sell and hold. Get started in minutes.',
+              href: 'https://www.coinbase.com/join' }
+  };
+  var ad = ADS[new URLSearchParams(location.search).get('id')] || { bg: '#555', head: 'Ad', body: '', href: 'https://example.com/' };
+  var a = document.createElement('a');
+  a.href = ad.href;
+  a.target = '_blank';
+  a.style.background = ad.bg;
+  var b = document.createElement('b'); b.textContent = ad.head;
+  var s = document.createElement('span'); s.textContent = ad.body;
+  var m = document.createElement('small'); m.textContent = 'Sponsored';
+  a.append(b, s, m);
+  document.body.append(a);
+</script>
+</body>

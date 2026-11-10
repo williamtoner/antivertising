@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Daily Placeholder — Antivertising demo</title>
+<style>
+  body { margin: 0; background: #faf8f3; color: #1b1b1b; font: 17px/1.6 Georgia, "Times New Roman", serif; }
+  .wrap { max-width: 1010px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { margin: 0 0 4px; font-size: 40px; letter-spacing: -0.02em; }
+  .dek { margin: 0 0 20px; color: #666; font-style: italic; }
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
+  aside { display: grid; gap: 22px; }
+  .slot { text-align: center; margin: 18px 0; }
+  .slot-label { display: block; margin-bottom: 4px; color: #999; font: 10px/1 sans-serif; letter-spacing: .12em; text-transform: uppercase; text-align: center; }
+  iframe { border: 0; vertical-align: top; }
+  .fake { display: flex; flex-direction: column; justify-content: center; gap: 6px; width: 100%; height: 100%; padding: 10px 14px;
+          box-sizing: border-box; color: #fff; text-decoration: none; text-align: left; font: 14px/1.3 Georgia, serif; }
+  .fake b { font-size: 20px; }
+  .expect { color: #8a6d00; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+  .row { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+  @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>The Daily Placeholder</h1>
+  <p class="dek">A fake newspaper with fake ads, for watching Antivertising work. Each slot says what it should turn into.</p>
+
+  <!-- 1. AdSense-style slot, advertiser readable straight from the page -->
+  <div class="slot">
+    <span class="slot-label">Advertisement</span>
+    <ins class="adsbygoogle" style="display:inline-block;width:728px;height:90px;max-width:100%">
+      <a class="fake" style="background:#004b93" href="https://www.pepsi.com/zero-sugar" target="_blank">
+        <b>That's what I like.</b><span>Pepsi Zero Sugar. Zero compromise.</span>
+      </a>
+    </ins>
+    <div class="expect">Pepsi → its arch-rival, Coca-Cola</div>
+  </div>
+
+  <div class="cols">
+    <main>
+      <p>Local man reports that he has, once again, been shown an advertisement for the exact pair of shoes he bought
+      yesterday. "It's as if they know," he said, "but not quite enough."</p>
+      <p>This paragraph links to <a href="https://www.pepsi.com/">pepsi.com</a> and
+      <a href="https://www.nike.com/">nike.com</a> on purpose. It is ordinary page content, not an ad, and should be
+      left exactly as it is.</p>
+
+      <!-- 3. GPT-style slot: cross-origin wrapper frame containing the real ad frame -->
+      <div class="row">
+        <div>
+          <span class="slot-label">Advertisement</span>
+          <div id="div-gpt-ad-1699999999999-0" style="width:300px;height:250px">
+            <iframe data-ad="wrapper.html?id=bet" width="300" height="250" title="ad"></iframe>
+          </div>
+          <div class="expect">DraftKings (two frames deep)<br>→ "Keeping Your Money"</div>
+        </div>
+        <div>
+          <span class="slot-label">Advertisement</span>
+          <iframe id="google_ads_iframe_/1234/demo_coin_0" data-ad="ad.html?id=coin" width="300" height="250" title="ad"></iframe>
+          <div class="expect">Coinbase → "A Savings Account"</div>
+        </div>
+      </div>
+
+      <p>Experts agree the most effective advertisement is the one for the thing you were already going to buy, shown
+      to you just after you have bought it.</p>
+
+      <!-- 7. Billboard -->
+      <div class="slot">
+        <span class="slot-label">Advertisement</span>
+        <iframe id="google_ads_iframe_/1234/demo_tv_0" data-ad="ad.html?id=tv" width="660" height="165" style="max-width:100%" title="ad"></iframe>
+        <div class="expect">Netflix → Disney+</div>
+      </div>
+
+      <!-- 5. Mobile banner -->
+      <div class="slot">
+        <span class="slot-label">Advertisement</span>
+        <iframe id="google_ads_iframe_/1234/demo_shoes_0" data-ad="ad.html?id=shoes" width="320" height="50" title="ad"></iframe>
+        <div class="expect">Nike → adidas</div>
+      </div>
+
+      <!-- 6. Nothing recognisable -->
+      <div class="slot">
+        <span class="slot-label">Advertisement</span>
+        <ins class="adsbygoogle" style="display:inline-block;width:300px;height:250px">
+          <a class="fake" style="background:#6a1b9a" href="https://zorblax.example/widgets" target="_blank">
+            <b>Zorblax Widgets</b><span>The widget your grandmother would have wanted.</span>
+          </a>
+        </ins>
+        <div class="expect">Unknown advertiser → generic heckle (after about 5 seconds)</div>
+      </div>
+
+      <!-- control: an ordinary embed that is not an ad -->
+      <div class="slot">
+        <span class="slot-label">Not an ad</span>
+        <iframe id="plain-embed" data-ad="ad.html?id=shoes" width="320" height="50" title="embed"></iframe>
+        <div class="expect">An ordinary iframe with the same Nike content. Should be left alone.</div>
+      </div>
+    </main>
+
+    <aside>
+      <!-- 2. Cross-origin frame, advertiser hidden behind a click tracker -->
+      <div>
+        <span class="slot-label">Advertisement</span>
+        <iframe id="google_ads_iframe_/1234/demo_burger_0" data-ad="ad.html?id=burger" width="300" height="250" title="ad"></iframe>
+        <div class="expect">McDonald's (via a click-tracker URL) → Burger King</div>
+      </div>
+
+      <!-- 8. Half-page -->
+      <div>
+        <span class="slot-label">Advertisement</span>
+        <iframe id="google_ads_iframe_/1234/demo_vpn_0" data-ad="ad.html?id=vpn" width="300" height="600" title="ad"></iframe>
+        <div class="expect">NordVPN → ExpressVPN</div>
+      </div>
+
+      <!-- 4. No brand at all, only ad copy -->
+      <div>
+        <span class="slot-label">Advertisement</span>
+        <div data-ad-slot="4455667788" style="width:160px;height:600px;margin:0 auto">
+          <a class="fake" style="background:#37474f" href="https://ads.dealer-network.example/c?id=991" target="_blank">
+            <b>The all-new 2027 SUV</b><span>Lease from $399/month. 0% APR for 60 months. Book a test drive at your local dealership.</span>
+          </a>
+        </div>
+        <div class="expect">No brand, but clearly a car ad → "The Bus"</div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+  // Ad frames are served from the "other" loopback name so that they are
+  // cross-origin to this page, exactly like real third-party ad iframes.
+  var other = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+  var base = location.protocol + '//' + other + (location.port ? ':' + location.port : '') + '/ads/';
+  document.querySelectorAll('iframe[data-ad]').forEach(function (f) { f.src = base + f.getAttribute('data-ad'); });
+</script>
+</body>
+</html>

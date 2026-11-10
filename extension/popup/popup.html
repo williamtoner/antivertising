@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Antivertising</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Antivertising</h1>
+      <p class="strap">Ads aren't blocked. They're betrayed.</p>
+    </div>
+    <label class="switch" title="Turn Antivertising on or off">
+      <input type="checkbox" id="enabled">
+      <span class="track"><span class="thumb"></span></span>
+      <span class="sr">Enabled</span>
+    </label>
+  </header>
+
+  <section class="score">
+    <div class="total"><span id="total">0</span></div>
+    <div class="total-label">ads turned against<br>whoever paid for them</div>
+  </section>
+
+  <section id="victims-section" hidden>
+    <h2>Most sabotaged</h2>
+    <ol id="victims"></ol>
+  </section>
+
+  <section>
+    <h2>Strategy</h2>
+    <div class="modes" role="radiogroup" aria-label="Strategy">
+      <label><input type="radio" name="mode" value="auto"><span>Max damage</span></label>
+      <label><input type="radio" name="mode" value="rival"><span>Rival</span></label>
+      <label><input type="radio" name="mode" value="nemesis"><span>Nemesis</span></label>
+    </div>
+    <p class="hint" id="mode-hint"></p>
+  </section>
+
+  <section class="options">
+    <label class="row">
+      <input type="checkbox" id="fallback">
+      <span>Heckle ads I can't identify</span>
+    </label>
+    <label class="row" id="pause-row" hidden>
+      <input type="checkbox" id="pause">
+      <span>Leave ads alone on <b id="host"></b></span>
+    </label>
+  </section>
+
+  <footer>
+    <button type="button" id="reset">Reset score</button>
+    <span>Nothing leaves your browser.</span>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

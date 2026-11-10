@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""End-to-end check: load the unpacked extension into Chromium, open the demo
+page, and assert every fake ad turned into the right counter-ad.
+
+    pip install playwright && playwright install chromium
+    python3 test/e2e.py [--shots DIR]
+
+Set AV_CHROMIUM to use a specific Chromium binary.
+"""
+import argparse
+import functools
+import http.server
+import os
+import sys
+import tempfile
+import threading
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+ROOT = Path(__file__).resolve().parent.parent
+EXT = ROOT / "extension"
+DEMO = ROOT / "demo"
+
+# data-av-original -> data-av-counter, one per ad slot on the demo page
+EXPECTED = {
+    "Pepsi": "coca-cola",
+    "McDonald's": "burger-king",
+    "DraftKings": "nemesis:gambling",
+    "Coinbase": "nemesis:crypto",
+    "Netflix": "disney-plus",
+    "Nike": "adidas",
+    "NordVPN": "expressvpn",
+    "cars": "nemesis:cars",
+    "": "generic",
+}
+
+
+class Quiet(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+
+def serve():
+    handler = functools.partial(Quiet, directory=str(DEMO))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def swaps(page):
+    return page.evaluate(
+        """() => Array.from(document.querySelectorAll('[data-antivertising]')).map(h => ({
+            original: h.getAttribute('data-av-original'),
+            counter: h.getAttribute('data-av-counter'),
+            width: h.offsetWidth, height: h.offsetHeight,
+        }))"""
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--shots", help="directory to save screenshots in")
+    args = parser.parse_args()
+
+    server = serve()
+    url = "http://localhost:%d/index.html" % server.server_address[1]
+    failures = []
+
+    with sync_playwright() as p, tempfile.TemporaryDirectory() as profile:
+        launch = dict(
+            headless=True,
+            viewport={"width": 1100, "height": 900},
+            args=["--disable-extensions-except=%s" % EXT, "--load-extension=%s" % EXT],
+        )
+        if os.environ.get("AV_CHROMIUM"):
+            launch["executable_path"] = os.environ["AV_CHROMIUM"]
+        else:
+            launch["channel"] = "chromium"
+        ctx = p.chromium.launch_persistent_context(profile, **launch)
+
+        worker = ctx.service_workers[0] if ctx.service_workers else ctx.wait_for_event("serviceworker", timeout=15000)
+        ext_id = worker.url.split("/")[2]
+
+        page = ctx.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.goto(url)
+
+        # Recognised advertisers are swapped within a second or two; the
+        # generic heckle deliberately waits about five.
+        page.wait_for_function(
+            "n => document.querySelectorAll('[data-antivertising]').length >= n", arg=len(EXPECTED), timeout=20000
+        )
+        page.wait_for_timeout(600)
+        got = {s["original"]: s for s in swaps(page)}
+
+        for original, counter in EXPECTED.items():
+            label = original or "(unidentified)"
+            if original not in got:
+                failures.append("%s: not replaced" % label)
+            elif got[original]["counter"] != counter:
+                failures.append("%s: expected %s, got %s" % (label, counter, got[original]["counter"]))
+        for original in got:
+            if original not in EXPECTED:
+                failures.append("unexpected swap of %r -> %s" % (original, got[original]["counter"]))
+
+        # Ordinary content must be untouched.
+        if not page.evaluate("document.getElementById('plain-embed').offsetWidth > 0"):
+            failures.append("the non-ad iframe was hidden")
+        if page.evaluate("document.querySelectorAll('main p a').length") != 2:
+            failures.append("article links were disturbed")
+
+        # Each card takes exactly the space of the ad it replaced.
+        pepsi = got.get("Pepsi")
+        if pepsi and (pepsi["width"], pepsi["height"]) != (728, 90):
+            failures.append("Pepsi card is %sx%s, expected 728x90" % (pepsi["width"], pepsi["height"]))
+
+        if args.shots:
+            Path(args.shots).mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(Path(args.shots) / "demo.png"), full_page=True)
+
+        # The corner flag brings the original ad back.
+        before = len(swaps(page))
+        box = page.locator("[data-av-original='Pepsi']").bounding_box()
+        page.mouse.click(box["x"] + box["width"] - 12, box["y"] + 6)
+        page.wait_for_timeout(200)
+        if len(swaps(page)) != before - 1:
+            failures.append("clicking the corner flag did not restore the ad")
+        if not page.evaluate("document.querySelector('ins.adsbygoogle').offsetWidth > 0"):
+            failures.append("the original Pepsi ad did not come back")
+
+        # Scorekeeping reached storage.
+        popup = ctx.new_page()
+        popup.set_viewport_size({"width": 320, "height": 560})
+        popup.goto("chrome-extension://%s/popup/popup.html" % ext_id)
+        popup.wait_for_function("document.getElementById('total').textContent !== '0'", timeout=5000)
+        total = popup.inner_text("#total")
+        if total != str(len(EXPECTED)):
+            failures.append("popup shows %s swaps, expected %d" % (total, len(EXPECTED)))
+        if args.shots:
+            popup.wait_for_timeout(300)  # let the switch finish sliding
+            popup.screenshot(path=str(Path(args.shots) / "popup.png"), full_page=True)
+
+        # Switching off restores every ad on the open page, live.
+        popup.click("label.switch")
+        page.bring_to_front()
+        page.wait_for_function("document.querySelectorAll('[data-antivertising]').length === 0", timeout=5000)
+
+        if errors:
+            failures.append("page errors: %s" % errors)
+        ctx.close()
+
+    server.shutdown()
+    if failures:
+        print("FAILED")
+        for f in failures:
+            print("  -", f)
+        return 1
+    print("ok: %d ads swapped as expected, undo and off-switch work" % len(EXPECTED))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
