@@ -32,7 +32,7 @@ EXPECTED = {
     "Nike": "adidas",
     "NordVPN": "expressvpn",
     "cars": "nemesis:cars",
-    "": "generic",
+    "zorblax.example": "generic",
 }
 
 
@@ -142,6 +142,36 @@ def main():
             popup.wait_for_timeout(300)  # let the switch finish sliding
             popup.screenshot(path=str(Path(args.shots) / "popup.png"), full_page=True)
 
+        # Every swap is in the ad log, with what the ad was and what replaced it.
+        log = popup.evaluate(
+            """async () => {
+                const { logMeta } = await chrome.storage.local.get('logMeta');
+                if (!logMeta) return [];
+                const keys = [];
+                for (let i = logMeta.first; i <= logMeta.last; i++) keys.push('log:' + i);
+                const stored = await chrome.storage.local.get(keys);
+                return keys.flatMap(k => stored[k] || []);
+            }"""
+        )
+        if len(log) != len(EXPECTED):
+            failures.append("ad log has %d entries, expected %d" % (len(log), len(EXPECTED)))
+        pepsi_row = next((e for e in log if e.get("brand") == "pepsi"), None)
+        if not pepsi_row:
+            failures.append("ad log has no Pepsi entry")
+        else:
+            for field, want in (("counter", "coca-cola"), ("kind", "rival"), ("size", "728x90"), ("page", "localhost")):
+                if pepsi_row.get(field) != want:
+                    failures.append("Pepsi log entry has %s=%r, expected %r" % (field, pepsi_row.get(field), want))
+        unknown = next((e for e in log if e.get("kind") == "generic"), None)
+        if not unknown or unknown.get("landing") != "zorblax.example":
+            failures.append("ad log did not record the unknown advertiser's landing site")
+        if "%d ads logged" % len(EXPECTED) not in popup.inner_text("#log-count"):
+            failures.append("popup log count reads %r" % popup.inner_text("#log-count"))
+        with popup.expect_download(timeout=5000) as download:
+            popup.click("#log-export")
+        if not download.value.suggested_filename.startswith("antivertising-log-"):
+            failures.append("export saved as %r" % download.value.suggested_filename)
+
         # Switching off restores every ad on the open page, live.
         popup.click("label.switch")
         page.bring_to_front()
@@ -157,7 +187,7 @@ def main():
         for f in failures:
             print("  -", f)
         return 1
-    print("ok: %d ads swapped as expected, undo and off-switch work" % len(EXPECTED))
+    print("ok: %d ads swapped as expected, undo, off-switch and ad log work" % len(EXPECTED))
     return 0
 
 

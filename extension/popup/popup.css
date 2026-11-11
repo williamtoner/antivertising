@@ -107,3 +107,16 @@ footer button {
 footer button:hover, footer button:focus-visible { color: var(--hazard); outline: none; }
 
 body.off .score, body.off section:not(.score) h2, body.off .modes, body.off .hint, body.off .options { opacity: 0.45; }
+
+/* ---- ad log ---- */
+.log-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.log-actions { display: flex; gap: 6px; flex: none; }
+.log-actions button {
+  font: inherit; font-size: 11px; cursor: pointer;
+  background: transparent; color: inherit;
+  border: 1px solid var(--line); border-radius: 3px; padding: 3px 8px;
+}
+.log-actions button:hover:not(:disabled), .log-actions button:focus-visible { color: var(--hazard); outline: none; }
+.log-actions button:disabled { opacity: 0.35; cursor: default; }
+.log .hint { min-height: 0; }
+body.off .log-row { opacity: 0.45; }

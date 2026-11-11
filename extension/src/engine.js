@@ -6,6 +6,7 @@
 (function (root) {
   'use strict';
 
+  // data.js is the hand-written core; data-more.js and data-new.js add the long list.
   var DATA = root.AV_DATA || (typeof require === 'function' ? require('./data.js') : null);
 
   // How much a counter-ad hurts, on the same 1-10 scale as nemesis.damage.
@@ -13,17 +14,22 @@
   var DAMAGE_RIVAL = 7;  // the sale goes to some other competitor
 
   // Links that say something about the ad network, not the advertiser.
-  var SKIP_URL = /adchoices|adprefs|ad-preferences|adssettings|whythisad|why-this-ad|aboutads|privacy|opt-?out|\/policies|\/legal|\/terms/i;
+  var SKIP_URL = /adchoices|adprefs|ad[-_]?preferences|adssettings|whythisad|why-this-ad|aboutads|about-service|privacy|opt-?out|\/policies|\/legal|\/terms/i;
 
   var MAX_URLS = 80;
   var MAX_TEXT = 4000;
+
+  var MIN_LABEL = 4;
 
   function escapeRe(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   function normaliseText(s) {
-    return String(s || '').replace(/[‘’ʼ]/g, "'").replace(/\s+/g, ' ').slice(0, MAX_TEXT);
+    s = String(s || '');
+    // Full-width "ＰａｙＰａｙ" and half-width kana should compare equal to the plain forms.
+    if (s.normalize) s = s.normalize('NFKC');
+    return s.replace(/[‘’ʼ]/g, "'").replace(/\s+/g, ' ').slice(0, MAX_TEXT);
   }
 
   function wordRe(phrase) {
@@ -35,6 +41,7 @@
   function buildIndex(data) {
     var brands = {};
     var domains = [];
+    var labels = {};
     var aliases = [];
     var keywords = [];
 
@@ -45,17 +52,27 @@
         brand.category = catId;
         brands[brand.id] = brand;
         brand.domains.forEach(function (d) {
-          domains.push({ domain: d.toLowerCase(), brand: brand });
+          d = d.toLowerCase();
+          domains.push({ domain: d, brand: brand });
+          // A distinctive name is the same advertiser on any country's domain:
+          // ikea.com, ikea.jp, ikea.co.uk. Not for ambiguous names ("strict"),
+          // where zoom.co.jp or corona.co.jp is somebody else entirely, and
+          // not for subdomain entries such as music.apple.com.
+          var label = d.split('.')[0];
+          if (brand.strict || label.length < MIN_LABEL || siteOf(d) !== d) return;
+          if (labels[label] && labels[label] !== brand) { labels[label] = false; return; }
+          if (labels[label] !== false) labels[label] = brand;
         });
         var names = (brand.aliases || []).slice();
         if (!brand.strict) names.push(brand.name);
         names.forEach(function (name) {
-          aliases.push({ text: name.toLowerCase(), re: wordRe(name), brand: brand });
+          name = normaliseText(name).toLowerCase();
+          if (name) aliases.push({ text: name, re: wordRe(name), brand: brand });
         });
       });
       (cat.keywords || []).forEach(function (kw) {
         var strong = kw.charAt(0) === '!';
-        var phrase = strong ? kw.slice(1) : kw;
+        var phrase = normaliseText(strong ? kw.slice(1) : kw);
         keywords.push({ re: wordRe(phrase), cat: cat, weight: strong ? 2 : 1 });
       });
     });
@@ -65,10 +82,14 @@
     domains.sort(function (a, b) { return b.domain.length - a.domain.length; });
     aliases.sort(function (a, b) { return b.text.length - a.text.length; });
 
-    return { brands: brands, domains: domains, aliases: aliases, keywords: keywords, data: data };
+    return { brands: brands, domains: domains, labels: labels, aliases: aliases, keywords: keywords, data: data };
   }
 
-  var INDEX = DATA ? buildIndex(DATA) : null;
+  var INDEX = null; // built on first use, after siteOf() below exists
+  function theIndex() {
+    if (!INDEX && DATA) INDEX = buildIndex(DATA);
+    return INDEX;
+  }
 
   // ---- reading signals -----------------------------------------------------
 
@@ -97,20 +118,118 @@
       var d = index.domains[i].domain;
       if (host === d || host.slice(-(d.length + 1)) === '.' + d) return index.domains[i].brand;
     }
-    return null;
+    return index.labels[siteOf(host).split('.')[0]] || null;
+  }
+
+  // ---- naming advertisers we have never heard of ----------------------------
+  // Most real ads are for brands that are not in the database. We can often
+  // still say where the ad leads, which makes for a better heckle than nothing.
+
+  // Ad plumbing: servers that sit between the click and the advertiser.
+  var INFRA_DOMAINS = [
+    'doubleclick.net', 'googlesyndication.com', 'googleadservices.com', 'google.com', 'gstatic.com',
+    '2mdn.net', 'adtrafficquality.google', 'googletagservices.com', 'googletagmanager.com',
+    'amazon-adsystem.com', 'adnxs.com', 'criteo.com', 'criteo.net', 'taboola.com', 'outbrain.com',
+    'pubmatic.com', 'rubiconproject.com', 'openx.net', 'adform.net', 'smartadserver.com',
+    'casalemedia.com', 'adsrvr.org', 'moatads.com', 'doubleverify.com', 'adsafeprotected.com',
+    'scorecardresearch.com', 'quantserve.com', 'integralads.com', 'adlightning.com', 'confiant.com', 'redintelligence.net', 'optinadserving.com',
+    'youradchoices.com', 'aboutads.info', 'flashtalking.com', 'serving-sys.com', 'sizmek.com',
+    'teads.tv', 'media.net', 'sharethrough.com', '3lift.com', 'yieldmo.com', 'innovid.com',
+    'adroll.com', 'bidswitch.net', 'demdex.net', 'everesttech.net', 'dotomi.com', 'mathtag.com',
+    'rlcdn.com', 'bluekai.com', 'krxd.net', 'tapad.com', 'agkn.com', 'w3.org', 'facebook.com',
+    'instagram.com', 'x.com', 'twitter.com', 'youtube.com', 'linkedin.com', 'tiktok.com',
+    // Japanese ad networks
+    'i-mobile.co.jp', 'microad.jp', 'microad.net', 'adingo.jp', 'fluct.jp', 'gmossp-sp.jp', 'genieesspv.jp',
+    'geniee.jp', 'gssprt.jp', 'logly.co.jp', 'popin.cc', 'yimg.jp', 'yjtag.jp', 'ard.yahoo.co.jp',
+    'rd.listing.yahoo.co.jp', 'yads.yahoo.co.jp', 'im-apps.net', 'impact-ad.jp', 'socdm.com', 'ladsp.com',
+    'adtdp.com', 'amoad.com', 'zucks.net', 'nend.net', 'ad-stir.com', 'aja-recommend.com', 'uncn.jp',
+    'smartnews-ads.com', 'a8.net', 'valuecommerce.com', 'accesstrade.net', 'moshimo.com', 'ipdsrv.de',
+    // App stores: where an app ad leads, but not who paid for it
+    'apps.apple.com', 'itunes.apple.com', 'play.google.com', 'apps.microsoft.com', 'app.adjust.com',
+    'onelink.me', 'app.link', 'appsflyer.com'
+  ];
+  // An app ad's store link must not be read as an ad for the store's owner.
+  var STORE_HOSTS = { 'apps.apple.com': 1, 'itunes.apple.com': 1, 'play.google.com': 1, 'apps.microsoft.com': 1 };
+  // Hostname labels that give plumbing away: ads.example.com, click.example.net
+  var INFRA_LABEL = /(^|[.-])(ads?|adx|adserver|adserving|adservice|clicks?|clk|track|tracking|trk|pixel|sync|redirect|rtb|bid|dsp|ssp|cdn|static|analytics|metrics|tags?|beacon|events?)\d*(?=[.-])/;
+
+  function isInfra(host) {
+    for (var i = 0; i < INFRA_DOMAINS.length; i++) {
+      var d = INFRA_DOMAINS[i];
+      if (host === d || host.slice(-(d.length + 1)) === '.' + d) return true;
+    }
+    return INFRA_LABEL.test(host);
+  }
+
+  // "shop.example.co.uk" -> "example.co.uk". A rule of thumb, not the full
+  // public-suffix list, which is good enough for a label on a joke.
+  var SECOND_LEVEL = { co: 1, com: 1, org: 1, net: 1, ac: 1, gov: 1, edu: 1, ne: 1, or: 1, go: 1 };
+  function siteOf(host) {
+    var labels = String(host || '').toLowerCase().replace(/^www\./, '').split('.');
+    if (labels.length <= 2) return labels.join('.');
+    var tld = labels[labels.length - 1];
+    var keep = tld.length === 2 && SECOND_LEVEL[labels[labels.length - 2]] ? 3 : 2;
+    return labels.slice(-keep).join('.');
+  }
+
+  // The site named by a click tracker's adurl= parameter, the one place a
+  // tracker states its destination outright.
+  function adurlSite(link) {
+    var m = /[?&;]adurl=([^&]+)/i.exec(link);
+    if (!m) return null;
+    var target = m[1];
+    try { target = decodeURIComponent(target); } catch (e) { /* use it as it is */ }
+    var host = /^https?:\/\/([a-z0-9.-]+)/i.exec(target);
+    return host ? siteOf(host[1]) : null;
   }
 
   /*
-   * signals: { urls: string[], text: string }
-   * returns: { brand, category, score, via } where via is
-   *          'domain' | 'text' | 'keyword' | null
+   * Where do this ad's click links lead? A landing page wrapped inside a
+   * click-tracker URL counts double; a bare link to a non-plumbing host
+   * counts once. Returns { domain, house }: house means every link we could
+   * read goes back to the page's own site, i.e. the publisher is promoting
+   * itself and nobody paid for the slot.
+   */
+  function landingDomain(links, pageHost) {
+    var counts = {};
+    var own = pageHost ? siteOf(pageHost) : null;
+    var ownHits = 0;
+    (links || []).slice(0, MAX_URLS).forEach(function (link) {
+      var hosts = hostsFromUrl(link);
+      if (!hosts.length) return;
+      // Click trackers often carry the address of the page the ad is on.
+      // That is not where the ad leads, and not a sign of a house promo.
+      var wrapped = hosts.slice(1).filter(function (h) { return !isInfra(h) && siteOf(h) !== own; });
+      var found = wrapped.length ? wrapped : isInfra(hosts[0]) ? [] : [hosts[0]];
+      if (!wrapped.length && own && adurlSite(link) === own) ownHits++;
+      found.forEach(function (h) {
+        var site = siteOf(h);
+        if (site === own) { ownHits++; return; }
+        counts[site] = (counts[site] || 0) + (wrapped.length ? 2 : 1);
+      });
+    });
+    var best = null;
+    Object.keys(counts).forEach(function (site) {
+      if (!best || counts[site] > counts[best]) best = site;
+    });
+    return { domain: best, house: !best && ownHits > 0 };
+  }
+
+  /*
+   * signals: { urls: string[], links: string[], text: string, pageHost: string }
+   * returns: { brand, category, score, via, domain, house } where
+   *   via     how the brand or category was recognised:
+   *           'domain' | 'text' | 'keyword' | null
+   *   domain  where the ad's links lead, even if we do not know the brand
+   *   house   the slot only links to the page's own site
    */
   function identify(signals, index) {
-    index = index || INDEX;
+    index = index || theIndex();
     var scores = {};
     var via = {};
     var urls = (signals && signals.urls) || [];
     var text = normaliseText(signals && signals.text).toLowerCase();
+    var landing = landingDomain(signals && signals.links, signals && signals.pageHost);
 
     function add(brand, points, how) {
       scores[brand.id] = (scores[brand.id] || 0) + points;
@@ -120,7 +239,7 @@
     var domainHits = {};
     urls.slice(0, MAX_URLS).forEach(function (url) {
       hostsFromUrl(url).forEach(function (host) {
-        var brand = brandForHost(host, index);
+        var brand = STORE_HOSTS[host] ? null : brandForHost(host, index);
         if (!brand) return;
         domainHits[brand.id] = (domainHits[brand.id] || 0) + 1;
         if (domainHits[brand.id] <= 3) add(brand, 3, 'domain');
@@ -146,9 +265,16 @@
     Object.keys(scores).forEach(function (id) {
       if (!best || scores[id] > scores[best]) best = id;
     });
+    // A slot whose every link leads back to this site is the publisher's own
+    // box ("Best CPUs for gaming"), however many brands its text mentions.
+    // Only a brand's own domain proves somebody paid.
+    if (landing.house && (!best || via[best] !== 'domain')) {
+      return { brand: null, category: null, score: 0, via: null, domain: null, house: true };
+    }
+
     if (best) {
       var brand = index.brands[best];
-      return { brand: brand, category: index.data.categories[brand.category], score: scores[best], via: via[best] };
+      return { brand: brand, category: index.data.categories[brand.category], score: scores[best], via: via[best], domain: landing.domain, house: false };
     }
 
     // No brand: fall back to what kind of thing is being sold.
@@ -162,9 +288,9 @@
       if (catScores[id] >= 2 && (!bestCat || catScores[id] > catScores[bestCat])) bestCat = id;
     });
     if (bestCat) {
-      return { brand: null, category: index.data.categories[bestCat], score: catScores[bestCat], via: 'keyword' };
+      return { brand: null, category: index.data.categories[bestCat], score: catScores[bestCat], via: 'keyword', domain: landing.domain, house: false };
     }
-    return { brand: null, category: null, score: 0, via: null };
+    return { brand: null, category: null, score: 0, via: null, domain: landing.domain, house: landing.house };
   }
 
   // ---- choosing the counter-ad ---------------------------------------------
@@ -173,8 +299,10 @@
     return list[Math.floor(rng() * list.length) % list.length];
   }
 
-  function rivalCreative(brand, original, damage) {
-    var origName = original ? original.name : 'the other one';
+  // original: the brand that paid, if we know it. domain: where the ad leads,
+  // which is the next best name for whoever paid.
+  function rivalCreative(brand, original, damage, domain) {
+    var origName = original ? original.name : domain || 'the other one';
     return {
       kind: 'rival',
       id: brand.id,
@@ -182,14 +310,14 @@
       color: brand.color,
       line: brand.line.replace(/\{orig\}/g, origName),
       cta: 'Try ' + brand.name + ' instead',
-      url: brand.url || 'https://www.' + brand.domains[0] + '/',
-      original: original ? original.name : null,
+      url: brand.url || 'https://' + (siteOf(brand.domains[0]) === brand.domains[0] ? 'www.' : '') + brand.domains[0] + '/',
+      original: original ? original.name : domain || null,
       category: null,
       damage: damage
     };
   }
 
-  function nemesisCreative(cat, original, rng) {
+  function nemesisCreative(cat, original, rng, domain) {
     var n = cat.nemesis;
     return {
       kind: 'nemesis',
@@ -199,17 +327,18 @@
       line: pick(n.lines, rng),
       cta: n.cta || null,
       url: n.url || null,
-      original: original ? original.name : null,
+      original: original ? original.name : domain || null,
       category: original ? null : cat.label,
       damage: n.damage
     };
   }
 
-  function genericCreative(data, rng) {
+  function genericCreative(data, rng, domain) {
     var g = data.generic;
+    var line = domain ? pick(g.namedLines, rng).replace(/\{orig\}/g, domain) : pick(g.lines, rng);
     return {
       kind: 'generic', id: 'generic', name: g.name, color: g.color,
-      line: pick(g.lines, rng), cta: g.cta || null, url: null, original: null, category: null, damage: 1
+      line: line, cta: g.cta || null, url: null, original: domain || null, category: null, damage: 1
     };
   }
 
@@ -224,13 +353,15 @@
    * Returns a creative, or null when nothing should be shown.
    */
   function pickCounter(match, opts, index) {
-    index = index || INDEX;
+    index = index || theIndex();
     opts = opts || {};
     var rng = opts.rng || Math.random;
     var mode = opts.mode || 'auto';
     var cat = match && match.category;
 
-    if (!cat) return opts.fallback === false ? null : genericCreative(index.data, rng);
+    var domain = (match && match.domain) || null;
+
+    if (!cat) return opts.fallback === false ? null : genericCreative(index.data, rng, domain);
 
     var original = match.brand;
     var rivals = [];
@@ -249,22 +380,25 @@
       var top = rivals[0].damage;
       var pool = rivals.filter(function (r) { return r.damage === top; });
       var choice = pick(pool, rng);
-      return rivalCreative(choice.brand, original, choice.damage);
+      return rivalCreative(choice.brand, original, choice.damage, domain);
     }
 
-    if (mode === 'nemesis' || !rivals.length) return nemesisCreative(cat, original, rng);
+    if (mode === 'nemesis' || !rivals.length) return nemesisCreative(cat, original, rng, domain);
     if (mode === 'rival') return bestRival();
 
     // auto: we only know the category, not the brand, so there is no specific
     // competitor to hand the sale to. Attack the category instead.
-    if (!original) return nemesisCreative(cat, original, rng);
-    return cat.nemesis.damage > rivals[0].damage ? nemesisCreative(cat, original, rng) : bestRival();
+    if (!original) return nemesisCreative(cat, original, rng, domain);
+    return cat.nemesis.damage > rivals[0].damage ? nemesisCreative(cat, original, rng, domain) : bestRival();
   }
 
   var api = {
     buildIndex: buildIndex,
     hostsFromUrl: hostsFromUrl,
     identify: identify,
+    landingDomain: landingDomain,
+    siteOf: siteOf,
+    isInfra: isInfra,
     pickCounter: pickCounter,
     DAMAGE_ARCH: DAMAGE_ARCH,
     DAMAGE_RIVAL: DAMAGE_RIVAL

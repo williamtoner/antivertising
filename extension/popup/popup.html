@@ -47,6 +47,22 @@
       <input type="checkbox" id="pause">
       <span>Leave ads alone on <b id="host"></b></span>
     </label>
+    <label class="row">
+      <input type="checkbox" id="logging">
+      <span>Keep a log of ads seen and their swaps</span>
+    </label>
+  </section>
+
+  <section class="log">
+    <h2>Ad log</h2>
+    <div class="log-row">
+      <span id="log-count">0 ads logged</span>
+      <span class="log-actions">
+        <button type="button" id="log-export">Export</button>
+        <button type="button" id="log-clear">Clear</button>
+      </span>
+    </div>
+    <p class="hint">Stored in this browser only. Export saves it as a file.</p>
   </section>
 
   <footer>

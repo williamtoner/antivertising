@@ -1,6 +1,6 @@
 'use strict';
 
-var DEFAULTS = { enabled: true, mode: 'auto', fallback: true, pausedHosts: [], stats: null };
+var DEFAULTS = { enabled: true, mode: 'auto', fallback: true, pausedHosts: [], stats: null, logging: true, logMeta: null };
 
 var HINTS = {
   auto: 'Whichever hurts most: usually the arch-rival, but for gambling, crypto and pay-later ads, the thing that makes the whole industry pointless.',
@@ -16,6 +16,11 @@ function render() {
   document.body.classList.toggle('off', !state.enabled);
   $('enabled').checked = state.enabled;
   $('fallback').checked = state.fallback;
+  $('logging').checked = state.logging;
+  var logged = state.logMeta ? state.logMeta.count : 0;
+  $('log-count').textContent = logged + (logged === 1 ? ' ad logged' : ' ads logged');
+  $('log-export').disabled = logged === 0;
+  $('log-clear').disabled = logged === 0;
   document.querySelectorAll('input[name="mode"]').forEach(function (input) {
     input.checked = input.value === state.mode;
   });
@@ -67,11 +72,60 @@ $('pause').addEventListener('change', function (e) {
   save({ pausedHosts: hosts });
 });
 $('reset').addEventListener('click', function () { save({ stats: null }); });
+$('logging').addEventListener('change', function (e) { save({ logging: e.target.checked }); });
+
+function logKeys(meta) {
+  var keys = [];
+  if (meta) for (var i = meta.first; i <= meta.last; i++) keys.push('log:' + i);
+  return keys;
+}
+
+// The log is a file the user saves themselves: nothing is uploaded anywhere.
+$('log-export').addEventListener('click', function () {
+  var keys = logKeys(state.logMeta);
+  chrome.storage.local.get(keys, function (stored) {
+    var entries = [];
+    keys.forEach(function (key) { entries = entries.concat(stored[key] || []); });
+    var file = {
+      app: 'Antivertising',
+      version: chrome.runtime.getManifest().version,
+      exported: new Date().toISOString(),
+      count: entries.length,
+      entries: entries
+    };
+    var url = URL.createObjectURL(new Blob([JSON.stringify(file, null, 1)], { type: 'application/json' }));
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'antivertising-log-' + file.exported.slice(0, 10) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+  });
+});
+
+// Two clicks, so a slip does not throw the dataset away.
+var clearArmed = null;
+$('log-clear').addEventListener('click', function (e) {
+  var button = e.target;
+  if (!clearArmed) {
+    button.textContent = 'Really clear?';
+    clearArmed = setTimeout(function () { clearArmed = null; button.textContent = 'Clear'; }, 3000);
+    return;
+  }
+  clearTimeout(clearArmed);
+  clearArmed = null;
+  button.textContent = 'Clear';
+  chrome.storage.local.remove(logKeys(state.logMeta).concat('logMeta'));
+  state.logMeta = null;
+  render();
+});
 
 chrome.storage.onChanged.addListener(function (changes, area) {
-  if (area !== 'local' || !changes.stats) return;
-  state.stats = changes.stats.newValue || null;
-  render();
+  if (area !== 'local') return;
+  if (changes.stats) state.stats = changes.stats.newValue || null;
+  if (changes.logMeta) state.logMeta = changes.logMeta.newValue || null;
+  if (changes.stats || changes.logMeta) render();
 });
 
 chrome.storage.local.get(DEFAULTS, function (stored) {

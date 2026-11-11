@@ -1,10 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Antivertising",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA+EgVBpLFkS3K1Xxc/7cMVlhZKiNq2Hi1Dow0dOCgcgU+7g9icH3jAUjxYl9WapagHScXoBvVHVgpk+qjCuY6sgMOiPE6RDV/wT6O1VYXmuUeBUQEGZ9pvXiCa0gSyWPMCk3dMFCmH+8/mCFBgqsLkbQkM+NKoYOlLjaTZ2Iv/znyODI4urZdCCF1/jrfdOrSjV/MlBGxwbyoI1qa05dMw5ERBJO3j4fhTZ/7SeFrheolgLKWY2Y7r5pR5lnqsmAm6CGr93Emowl3MLKR7R9r2s8Wo7SnBwPowWcBCQu+3ADjb/yzmm3swKBUNg96wD032ngOCVxJ8G9W6oYMniUWXwIDAQAB",
   "description": "Doesn't block ads. Replaces each one with the ad its advertiser would least like you to see.",
   "minimum_chrome_version": "111",
-  "permissions": ["storage", "webNavigation", "activeTab"],
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "webNavigation",
+    "activeTab"
+  ],
   "background": {
     "service_worker": "src/background.js"
   },
@@ -25,16 +31,31 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["src/collector.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "src/collector.js"
+      ],
       "all_frames": true,
       "match_about_blank": true,
       "match_origin_as_fallback": true,
       "run_at": "document_start"
     },
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["src/data.js", "src/engine.js", "src/card.js", "src/content.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "src/data.js",
+        "src/data-more.js",
+        "src/data-new.js",
+        "src/engine.js",
+        "src/card.js",
+        "src/content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

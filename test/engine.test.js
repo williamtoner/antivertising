@@ -223,5 +223,147 @@ test('unidentified ads get the generic heckle, or nothing if that is switched of
   assert.strictEqual(AV.pickCounter(none, { rng: first, fallback: false }), null);
 });
 
+// ---- advertisers that are not in the database ------------------------------------
+
+test('names the landing site of an unknown advertiser', function () {
+  var m = AV.identify({ links: ['https://googleads.g.doubleclick.net/pcs/click?x=1&adurl=https%3A%2F%2Fwww.nl.bauhaus%2Ftuin'], urls: [], text: '' });
+  assert.strictEqual(m.brand, null);
+  assert.strictEqual(m.domain, 'nl.bauhaus');
+  assert.strictEqual(AV.identify({ links: ['https://donate.good360.org/give'], urls: [], text: '' }).domain, 'good360.org');
+  assert.strictEqual(AV.identify({ links: ['https://shop.example.co.uk/x'], urls: [], text: '' }).domain, 'example.co.uk');
+});
+
+test('ad plumbing is never mistaken for the advertiser', function () {
+  var links = [
+    'https://googleads.g.doubleclick.net/dbm/clk?sa=L&ai=Cabc',
+    'https://hal90008.redintelligence.net/c/p2o26hj0t6l9cpm',
+    'https://ads.pexi.nl/click/123',
+    'https://click.someexchange.io/r?id=5',
+    'https://adssettings.google.com/whythisad?reasons=abc'
+  ];
+  assert.strictEqual(AV.identify({ links: links, urls: links, text: '' }).domain, null);
+  // frame sources are not click targets, so they never name the advertiser
+  assert.strictEqual(AV.identify({ links: [], urls: ['https://creative-host.example/ad.html'], text: '' }).domain, null);
+});
+
+test('a wrapped landing page beats a stray direct link', function () {
+  var m = AV.identify({ links: [
+    'https://www.somewhere-else.example/',
+    'https://adclick.g.doubleclick.net/aclk?adurl=https://www.realadvertiser.example/offer'
+  ], urls: [], text: '' });
+  assert.strictEqual(m.domain, 'realadvertiser.example');
+});
+
+test('slots that only link to the page itself are house promos, not ads', function () {
+  var m = AV.identify({ links: ['https://www.tomshardware.com/best-picks/best-cpus'], urls: [], text: 'Best CPUs', pageHost: 'www.tomshardware.com' });
+  assert.strictEqual(m.house, true);
+  assert.strictEqual(m.domain, null);
+  // a house promo that mentions brands in passing is still a house promo
+  var cpus = AV.identify({ links: ['https://www.tomshardware.com/reviews/best-cpus'], urls: [], text: 'Best CPUs for Gaming: the top AMD and Intel processors', pageHost: 'www.tomshardware.com' });
+  assert.strictEqual(cpus.house, true);
+  assert.strictEqual(cpus.brand, null);
+  // a paid ad on the same page is not
+  var paid = AV.identify({ links: ['https://www.tomshardware.com/about', 'https://www.acer.example/sale'], urls: [], text: '', pageHost: 'www.tomshardware.com' });
+  assert.strictEqual(paid.house, false);
+  assert.strictEqual(paid.domain, 'acer.example');
+  // a click tracker that merely mentions this page is a paid ad, not a house promo
+  var tracked = AV.identify({ links: ['https://googleads.g.doubleclick.net/pcs/click?xai=abc&ref=https%3A%2F%2Fwww.speedtest.net%2F'], urls: [], text: '', pageHost: 'www.speedtest.net' });
+  assert.strictEqual(tracked.house, false);
+  // ...unless the tracker's stated destination is this very site
+  var served = AV.identify({ links: ['https://adclick.g.doubleclick.net/pcs/click?xai=abc&adurl=https://www.tomshardware.com/best-picks'], urls: [], text: '', pageHost: 'www.tomshardware.com' });
+  assert.strictEqual(served.house, true);
+  // and no links at all tells us nothing either way
+  assert.strictEqual(AV.identify({ links: [], urls: [], text: '', pageHost: 'x.example' }).house, false);
+});
+
+test('the heckle names the advertiser when it can', function () {
+  var named = AV.pickCounter(AV.identify({ links: ['https://www.zorblax.example/widgets'], urls: [], text: '' }), { rng: first });
+  assert.strictEqual(named.kind, 'generic');
+  assert.strictEqual(named.original, 'zorblax.example');
+  assert.ok(named.line.indexOf('zorblax.example') !== -1 && named.line.indexOf('{orig}') === -1, named.line);
+  // category known, brand not: the nemesis card still says who it was
+  var car = AV.pickCounter(AV.identify({ links: ['https://www.vroomly.example/'], urls: [], text: 'The all-new SUV. Book a test drive.' }), { rng: first });
+  assert.strictEqual(car.name, 'The Bus');
+  assert.strictEqual(car.original, 'vroomly.example');
+});
+
+// ---- the long list ---------------------------------------------------------------
+
+test('the long list is loaded and well formed', function () {
+  var index = AV.buildIndex(DATA);
+  assert.ok(Object.keys(index.brands).length > 1000, 'only ' + Object.keys(index.brands).length + ' brands');
+  var aliasOwner = {};
+  index.aliases.forEach(function (a) {
+    assert.ok(!aliasOwner[a.text] || aliasOwner[a.text] === a.brand.id, 'the name "' + a.text + '" is claimed by both ' + aliasOwner[a.text] + ' and ' + a.brand.id);
+    aliasOwner[a.text] = a.brand.id;
+  });
+  Object.keys(index.brands).forEach(function (brandId) {
+    index.brands[brandId].domains.forEach(function (d) {
+      assert.ok(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d), brandId + ' has a malformed domain ' + d);
+    });
+  });
+  Object.keys(index.labels).forEach(function (label) {
+    assert.notStrictEqual(index.labels[label], false, 'two brands share the domain name "' + label + '"');
+  });
+});
+
+test('a distinctive brand is recognised on any country domain', function () {
+  assert.strictEqual(id({ urls: ['https://www.ikea.jp/rooms'], text: '' }), 'ikea');
+  assert.strictEqual(id({ urls: ['https://www.amazon.co.jp/dp/B000'], text: '' }), 'amazon');
+  assert.strictEqual(id({ urls: ['https://www.nike.com.br/'], text: '' }), 'nike');
+  // a more specific entry still wins
+  assert.strictEqual(id({ urls: ['https://travel.rakuten.co.jp/'], text: '' }), 'rakuten-travel');
+  assert.strictEqual(id({ urls: ['https://www.rakuten.co.jp/'], text: '' }), 'rakuten');
+});
+
+test('ambiguous names are not stretched to other domains', function () {
+  // Zoom the audio company and Corona the heater maker are not our Zoom and Corona.
+  assert.strictEqual(id({ urls: ['https://zoomcorp.com/', 'https://www.zoom.co.jp/'], text: '' }), null);
+  assert.strictEqual(id({ urls: ['https://www.corona.co.jp/'], text: '' }), null);
+  assert.strictEqual(id({ urls: ['https://nike.cheap-shoes.example/'], text: '' }), null);
+});
+
+test('identifies brands from Japanese ad text', function () {
+  assert.strictEqual(id({ urls: [], text: 'メルカリで売って、ほしいものを買おう' }), 'mercari');
+  assert.strictEqual(id({ urls: [], text: 'ドコモからのお知らせ' }), 'docomo');
+  // the longer name wins: PayPay Bank, not PayPay
+  assert.strictEqual(id({ urls: [], text: 'PayPay銀行で口座開設' }), 'paypay-bank');
+  assert.strictEqual(id({ urls: [], text: 'PayPayで支払うとおトク' }), 'paypay');
+  // full-width letters are the same letters
+  assert.strictEqual(id({ urls: [], text: 'ＰａｙＰａｙで支払うとおトク' }), 'paypay');
+});
+
+test('Japanese ad copy gives away the category', function () {
+  assert.strictEqual(id({ urls: [], text: '全身脱毛が月々1,000円。無料カウンセリング予約受付中' }), 'category:clinics');
+  assert.strictEqual(id({ urls: [], text: '最短即日融資。カードローンのお申込みはこちら' }), 'category:loans');
+  assert.strictEqual(id({ urls: [], text: '事前登録受付中！豪華ガチャ100連無料' }), 'category:games');
+});
+
+test('brands from the long list get a filled-in pitch', function () {
+  var c = counter({ urls: ['https://www.yoshinoya.com/'], text: '' });
+  assert.strictEqual(c.kind, 'rival');
+  assert.strictEqual(c.id, 'sukiya');
+  assert.ok(c.line.indexOf('Yoshinoya') !== -1 && c.line.indexOf('Sukiya') !== -1, c.line);
+  assert.ok(c.line.indexOf('{') === -1, c.line);
+});
+
+test('lenders and cosmetic clinics never become rival ads', function () {
+  ['auto', 'rival', 'nemesis'].forEach(function (mode) {
+    var loan = counter({ urls: ['https://www.acom.co.jp/'], text: '' }, mode);
+    assert.strictEqual(loan.kind, 'nemesis');
+    assert.strictEqual(loan.name, 'Not Borrowing It');
+    var clinic = counter({ urls: [], text: '湘南美容クリニックの二重整形' }, mode);
+    assert.strictEqual(clinic.kind, 'nemesis');
+    assert.strictEqual(clinic.name, 'Being Fine As You Are');
+  });
+});
+
+test('an app-store link is not an ad for the store', function () {
+  var m = AV.identify({ links: ['https://apps.apple.com/jp/app/some-game/id123'], urls: ['https://apps.apple.com/jp/app/some-game/id123'], text: '事前登録受付中！豪華ガチャ100連無料' });
+  assert.strictEqual(m.brand, null);
+  assert.strictEqual(m.category.id, 'games');
+  assert.strictEqual(m.domain, null);
+});
+
 console.log(passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

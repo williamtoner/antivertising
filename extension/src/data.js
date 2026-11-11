@@ -803,10 +803,92 @@
       'The best price is not buying it.',
       'You were about to be advertised to. You are welcome.',
       'Unsubscribe from wanting things.'
+    ],
+    // Used instead when we could at least read where the ad leads. {orig} is that domain.
+    namedLines: [
+      'Whatever {orig} is selling, you already own something that does it.',
+      '{orig} paid for this space. You paid attention to something else.',
+      '{orig} would like your money. Your money would like to stay where it is.',
+      'The best deal at {orig} is the one you do not take.'
     ]
   };
 
-  var data = { categories: categories, generic: generic };
+  // ---- compact rows for the long list (data-more.js, data-new.js) ------------
+  // The brands above each have a hand-written pitch. The long list would be
+  // unmaintainable that way, so its brands are one row each and borrow one of
+  // these stock pitches. {name} is the brand doing the replacing.
+  var PITCHES = [
+    'Someone paid to show you {orig}. {name} would like a word.',
+    '{orig} bought this space. {name} is using it.',
+    'Before you click on {orig}: {name} exists.',
+    '{orig} paid for this spot. It says {name} now.',
+    '{orig} wanted your attention. Give it to {name}.',
+    'This space was meant for {orig}. {name} moved in.'
+  ];
+
+  function pitchFor(id, name) {
+    var h = 0;
+    for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    return PITCHES[h % PITCHES.length].replace('{name}', name);
+  }
+
+  function split(s, sep) {
+    return s ? String(s).split(sep).filter(Boolean) : [];
+  }
+
+  function find(brandId) {
+    for (var catId in categories) {
+      var list = categories[catId].brands;
+      for (var i = 0; i < list.length; i++) if (list[i].id === brandId) return list[i];
+    }
+    throw new Error('no such brand: ' + brandId);
+  }
+
+  var rows = {
+    // x(id, name, colour, 'domain domain', archRivalId, 'alias|alias', strict)
+    x: function (id, name, color, domains, arch, aliases, strict) {
+      var brand = { id: id, name: name, color: color, domains: split(domains, ' '), line: pitchFor(id, name) };
+      if (arch) brand.arch = arch;
+      if (aliases) brand.aliases = split(aliases, '|');
+      if (strict) { brand.strict = true; brand.aliases = brand.aliases || []; }
+      return brand;
+    },
+    // Append brands to a category. Categories that never show rivals get no pitch.
+    add: function (catId, brands) {
+      var cat = categories[catId];
+      if (!cat) throw new Error('no such category: ' + catId);
+      brands.forEach(function (brand) {
+        if (cat.noRival) { brand.line = ''; delete brand.arch; }
+        cat.brands.push(brand);
+      });
+    },
+    // A whole new category: { label, keywords, nemesis, noRival }.
+    cat: function (catId, def, brands) {
+      if (categories[catId]) throw new Error('category exists: ' + catId);
+      def.brands = [];
+      categories[catId] = def;
+      rows.add(catId, brands || []);
+    },
+    // More ad-copy keywords, extra names or extra domains for something above.
+    kw: function (catId, words) {
+      categories[catId].keywords = (categories[catId].keywords || []).concat(words);
+    },
+    alias: function (brandId, aliases) {
+      var brand = find(brandId);
+      brand.aliases = (brand.aliases || []).concat(split(aliases, '|'));
+    },
+    dom: function (brandId, domains) {
+      var brand = find(brandId);
+      brand.domains = brand.domains.concat(split(domains, ' '));
+    }
+  };
+
+  var data = { categories: categories, generic: generic, rows: rows };
   root.AV_DATA = data;
-  if (typeof module !== 'undefined' && module.exports) module.exports = data;
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = data;
+    // In the browser the manifest loads these two next.
+    require('./data-more.js');
+    require('./data-new.js');
+  }
 })(typeof globalThis !== 'undefined' ? globalThis : this);

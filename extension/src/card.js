@@ -51,7 +51,12 @@
     '  .name{max-width:100%;font-size:min(var(--fit),calc(var(--k) * clamp(26px,30cqh,72px)));}',
     '  .line{flex:none;font-size:clamp(14px,11cqh,26px);}',
     '}',
-    '@container (min-aspect-ratio:5/2) and (max-width:560px){.cta{display:none;}}',
+    // phone banners (320x100, 468x60): no room for a button, and long lines get cut off cleanly
+    '@container (min-aspect-ratio:5/2) and (max-width:560px){',
+    '  .cta{display:none;}',
+    '  .name{max-width:40cqw;}',
+    '  .line{font-size:clamp(11px,13cqh,14px);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}',
+    '}',
     '@container (min-aspect-ratio:5/2) and (max-height:64px){',
     '  .link{padding:15px 10px 2px;}',
     '  .name{font-size:min(var(--fit-wide),calc(var(--k) * 17px));}',
