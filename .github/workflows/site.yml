@@ -6,13 +6,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # to publish the signed Firefox add-on as a release
   pages: write
   id-token: write
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # Never cut a run short: one that has sent a version to Mozilla must go on to keep the result.
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -20,12 +21,55 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: Unit tests
         run: node test/engine.test.js
+
+      - name: Build the Firefox add-on and run Mozilla's checks on it
+        run: |
+          python3 tools/build_firefox.py build/antivertising-firefox.zip
+          unzip -q build/antivertising-firefox.zip -d build/firefox
+          npx --yes web-ext@10 lint --self-hosted --warnings-as-errors --source-dir build/firefox
+
+      # Mozilla signs each version number once. A version that already has a
+      # release here is left alone, so this only does anything after the
+      # version in extension/manifest.json goes up. Needs two repository
+      # secrets from https://addons.mozilla.org/developers/addon/api/key/ ;
+      # without them the step is skipped and the site offers the unsigned build.
+      - name: Have Mozilla sign a new version
+        continue-on-error: true # a failure here must not stop the site going out
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          if [ -z "$WEB_EXT_API_KEY" ] || [ -z "$WEB_EXT_API_SECRET" ]; then
+            echo "No Mozilla API key in this repository's secrets: not signing."
+            exit 0
+          fi
+          version=$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version is already signed and released."
+            exit 0
+          fi
+          npx --yes web-ext@10 sign --channel unlisted --source-dir build/firefox --artifacts-dir build/signed
+          mv build/signed/*.xpi "build/antivertising-$version.xpi"
+          gh release create "v$version" "build/antivertising-$version.xpi" \
+            --title "Antivertising $version" \
+            --notes "The Firefox add-on, signed by Mozilla. Install it, or the Chrome version, from https://williamtoner.net/antivertising/"
+
+      - name: Fetch the newest signed Firefox add-on
+        run: |
+          mkdir -p build/latest
+          gh release download --pattern '*.xpi' --dir build/latest || echo "No signed add-on released yet."
+
       - name: Build the site
-        run: python3 tools/build_site.py _site
+        run: |
+          xpi=$(ls build/latest/*.xpi 2>/dev/null | head -1)
+          python3 tools/build_site.py _site ${xpi:+--signed "$xpi"}
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

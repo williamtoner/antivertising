@@ -240,7 +240,7 @@
 
   /*
    * A page cannot read a cross-origin iframe, and a content script cannot ask
-   * Chrome "which frame is this element?". Each frame has announced a one-off
+   * the browser "which frame is this element?". Each frame has announced a one-off
    * token to us (see the handshake in collector.js); we pass the tokens of
    * the slot's iframes to the background worker, which finds the frames that
    * own them and asks those, and every frame nested inside them, for their

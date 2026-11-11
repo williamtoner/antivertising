@@ -12,7 +12,7 @@ Every card carries a black strip saying who paid for the space. Hover it for **S
 
 ## Try it
 
-1. Open `chrome://extensions`, switch on **Developer mode**, click **Load unpacked** and pick the `extension/` folder. (Works in Chrome, Edge, Brave and other Chromium browsers; not Firefox yet.)
+1. Open `chrome://extensions`, switch on **Developer mode**, click **Load unpacked** and pick the `extension/` folder. (Works in Chrome, Edge, Brave and other Chromium browsers. For Firefox see [below](#firefox).)
 2. Start the demo page, which is a fake newspaper full of fake ads:
 
    ```bash
@@ -77,9 +77,29 @@ That is: id, name, colour, domains, arch-rival, aliases, and an optional final `
 
 Run the tests after editing. They check the database for duplicate domains and names, missing arch-rivals and brands that could be replaced by themselves.
 
+## Firefox
+
+Firefox runs the same code. Only the manifest differs, and `tools/build_firefox.py` writes the Firefox one from `extension/manifest.json`, so there is nothing to keep in step by hand:
+
+```bash
+python3 tools/build_firefox.py
+```
+
+That leaves `dist/antivertising-firefox-<version>.zip`. To try it, open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on…** and pick the zip. It needs Firefox 142 or later, on a computer.
+
+Release Firefox drops a temporary add-on when it quits, and only installs for good an add-on that Mozilla has signed. Signing does not mean listing it on addons.mozilla.org: Mozilla also signs add-ons that are handed out elsewhere, after automatic checks. The site workflow does this by itself whenever the version in `extension/manifest.json` goes up:
+
+1. it sends the build to Mozilla and waits for the signed `.xpi`;
+2. it attaches that to a GitHub release named after the version;
+3. it rebuilds the site with an **Add to Firefox** button and an update feed (`firefox/updates.json`), which installed copies check, so they update themselves.
+
+For that it needs a Mozilla API key in two repository secrets, `AMO_JWT_ISSUER` and `AMO_JWT_SECRET`, both from <https://addons.mozilla.org/developers/addon/api/key/>. Without them the step is skipped and the site explains the temporary route instead.
+
+Mozilla signs each version number once. If a run sends a version and then fails before making the release, download the signed file from the [developer hub](https://addons.mozilla.org/developers/addons) and attach it to a release called `v<version>` by hand, or raise the version and push again.
+
 ## The website
 
-`site/` is the public page. It loads the extension's own engine, card renderer and typeface, so the demo on it is the real thing, not a mock-up. Build it, with a fresh zip of the extension for the download button, into `dist/site`:
+`site/` is the public page. It loads the extension's own engine, card renderer and typeface, so the demo on it is the real thing, not a mock-up. Build it, with fresh copies of the extension for the download buttons, into `dist/site`:
 
 ```bash
 python3 tools/build_site.py
@@ -101,6 +121,12 @@ python3 test/e2e.py
 
 loads the extension into headless Chromium, opens the demo page and checks every slot. It needs `pip install playwright && playwright install chromium`.
 
+```bash
+python3 test/e2e_firefox.py
+```
+
+does the same in headless Firefox with the Firefox build. It needs `pip install selenium`, Firefox and [geckodriver](https://github.com/mozilla/geckodriver/releases).
+
 To see what the extension makes of ads on a real page, open the service worker console from `chrome://extensions` and run `chrome.storage.local.set({ debug: true })`. Every look at every slot is then logged to the page's console: its size, the links and text found, and what they matched.
 
 ## How it works inside
@@ -115,7 +141,7 @@ To see what the extension makes of ads on a real page, open the service worker c
 | `src/background.js` | Relays between frames, keeps score and the ad log. |
 | `src/card.js` | Draws the counter-ad in a closed shadow root. |
 
-The awkward part is that real ads live inside cross-origin iframes, often several deep, which the page cannot read, and no API tells a content script which Chrome frame belongs to which `<iframe>` element. So each frame under the top one makes up a one-off token and posts it to its parent, which can see which element the message came from. To read an ad, the top frame gives that token to the background worker, which asks every frame in the tab whose it is; the owner's answer reveals the frame id, and the worker then asks that frame and every frame nested inside it what the ad links to. Those answers travel over the extension's private message channel, never through the page.
+The awkward part is that real ads live inside cross-origin iframes, often several deep, which the page cannot read, and no API tells a content script which browser frame belongs to which `<iframe>` element. So each frame under the top one makes up a one-off token and posts it to its parent, which can see which element the message came from. To read an ad, the top frame gives that token to the background worker, which asks every frame in the tab whose it is; the owner's answer reveals the frame id, and the worker then asks that frame and every frame nested inside it what the ad links to. Those answers travel over the extension's private message channel, never through the page.
 
 The handshake runs child-to-parent because ad scripts build their frames with `document.open()`, which removes every DOM event listener inside the frame. A listener waiting there for a token from the parent is silently deleted; the first version worked that way and got nothing back from most real ads.
 
@@ -125,7 +151,8 @@ The handshake runs child-to-parent because ad scripts build their frames with `d
 - **No video ads.** YouTube pre-rolls and the like are untouched.
 - **Identification needs something to read.** A large share of real display ads are a picture whose click goes through an opaque redirect (`doubleclick.net/pcs/click?xai=...`), with no text and no stated destination. Those give no clues and get the generic heckle; only reading the image itself would identify them.
 - **The long tail is long.** The list is about 1,500 names, mostly American and Japanese. Local shops and small campaigns are not in it. Check the exported ad log to see who is being missed.
-- **The fixed `key` in the manifest** keeps the extension's ID, and therefore its score and log, the same wherever the folder is loaded from. Remove it before submitting to the Chrome Web Store.
+- **The fixed `key` in the manifest** keeps the extension's ID, and therefore its score and log, the same wherever the folder is loaded from. Remove it before submitting to the Chrome Web Store. (The Firefox build drops it and uses a named ID instead.)
+- **Not on phones.** Firefox for Android only installs add-ons listed on Mozilla's site.
 - The original ad still loads before it is replaced, so its advertiser may still be billed for the impression. Arguably a feature.
 
 ## Licence

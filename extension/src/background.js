@@ -1,12 +1,13 @@
 /*
- * Service worker. Two jobs:
+ * Background worker (a service worker in Chrome, an event page in Firefox).
+ * Two jobs:
  *   1. Relay: a page cannot see inside cross-origin ad iframes, so when the
  *      top frame asks about a slot we query every frame nested under it.
  *   2. Scorekeeping: count swaps for the popup and the toolbar badge, and
  *      keep the ad log (what each ad was and what replaced it).
  *
  * The only state held in memory is the half-second frame handshake below
- * (workers are killed when idle); everything lasting goes in
+ * (the browser stops the worker when idle); everything lasting goes in
  * chrome.storage.local. Nothing is sent over the network.
  */
 'use strict';

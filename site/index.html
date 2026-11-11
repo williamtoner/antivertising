@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-xpi="no">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -138,6 +138,16 @@
   .copyrow button { padding: 0.25rem 0.6rem; border: 1px solid var(--line); border-radius: 2px; background: transparent; color: var(--text); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
   .copyrow button:hover { border-color: var(--hazard); }
 
+  .pick { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 1.8rem; }
+  .pick button { padding: 0.55rem 0.95rem; border: 2px solid var(--line); border-radius: 2px; background: transparent; color: var(--text); font: inherit; font-weight: 700; cursor: pointer; }
+  .pick button:hover { border-color: var(--hazard); }
+  .pick button[aria-pressed="true"] { background: var(--hazard); border-color: var(--hazard); color: var(--ink); }
+  .browser .why { max-width: 40rem; margin: 1.4rem 0 0; color: var(--muted); }
+  .browser .install { margin-top: 1.2rem; }
+  .browser .after { max-width: 46rem; margin: 1.4rem 0 0; }
+  /* The build sets data-xpi="yes" once there is an add-on signed by Mozilla to offer. */
+  [data-xpi="no"] .fx-signed, [data-xpi="yes"] .fx-unsigned { display: none; }
+
   /* questions */
   .faq { max-width: 46rem; margin-top: 1.8rem; }
   details { border-top: 1px solid var(--line); }
@@ -168,7 +178,7 @@
       <h1><span id="h-paid">Pepsi</span> paid for this ad. <span class="now">It says <span id="h-now">Coca-Cola</span> now.</span></h1>
       <p class="lede">Antivertising is a free browser extension. It doesn't block ads. It replaces each one with an ad for the advertiser's worst enemy, so the money spent reaching you works against whoever spent it.</p>
       <div class="cta-row">
-        <a class="btn" href="#install">Get it for Chrome</a>
+        <a class="btn" href="#install" id="cta">Get it for Chrome</a>
         <a class="btn ghost" href="#try">Try it without installing</a>
       </div>
       <p class="small">Free and open source. Nothing leaves your browser.</p>
@@ -242,21 +252,58 @@
     <div class="wrap">
       <p class="eyebrow">Install</p>
       <h2>About a minute, on a computer.</h2>
-      <p>Works in Chrome, Edge, Brave and Arc. It isn't in the Chrome Web Store, so you load it by hand. Not on phones, Safari or Firefox yet.</p>
-      <ol class="install">
-        <li><div><h3>Download it</h3>
-          <a class="btn" href="antivertising.zip" download>Download antivertising.zip</a></div></li>
-        <li><div><h3>Unzip it</h3>
-          <p>Double-click the file. You get a folder called <code>antivertising</code>. Move it somewhere it can stay, such as Documents: the browser runs it from that folder.</p></div></li>
-        <li><div><h3>Open the extensions page</h3>
-          <p>Paste this into the address bar. Browsers don't allow links to it.</p>
-          <div class="copyrow"><code id="ext-url">chrome://extensions</code><button type="button" data-copy="ext-url">Copy</button></div></div></li>
-        <li><div><h3>Load the folder</h3>
-          <p>Switch on <strong>Developer mode</strong> at the top right. Click <strong>Load unpacked</strong> and choose the <code>antivertising</code> folder.</p></div></li>
-        <li><div><h3>Check it works</h3>
-          <p>Open the <a href="test/">test page</a>. It is a fake newspaper full of fake ads, and every one should flip.</p></div></li>
-      </ol>
-      <p class="small" style="max-width:46rem;margin-top:1.4rem">To update later, download again, replace what's in the folder, and press the reload arrow on the Antivertising card. Don't remove the extension, or your score resets.</p>
+      <p>Works in Chrome, Edge, Brave, Arc and Firefox. Not on phones or Safari yet.</p>
+      <div class="pick" role="group" aria-label="Your browser">
+        <button type="button" data-browser="chrome" aria-pressed="true">Chrome, Edge, Brave, Arc</button>
+        <button type="button" data-browser="firefox" aria-pressed="false">Firefox</button>
+      </div>
+
+      <div class="browser" id="for-chrome">
+        <p class="why">It isn't in the Chrome Web Store, so you load it by hand.</p>
+        <ol class="install">
+          <li><div><h3>Download it</h3>
+            <a class="btn" href="antivertising.zip" download>Download antivertising.zip</a></div></li>
+          <li><div><h3>Unzip it</h3>
+            <p>Double-click the file. You get a folder called <code>antivertising</code>. Move it somewhere it can stay, such as Documents: the browser runs it from that folder.</p></div></li>
+          <li><div><h3>Open the extensions page</h3>
+            <p>Paste this into the address bar. Browsers don't allow links to it.</p>
+            <div class="copyrow"><code id="ext-url">chrome://extensions</code><button type="button" data-copy="ext-url">Copy</button></div></div></li>
+          <li><div><h3>Load the folder</h3>
+            <p>Switch on <strong>Developer mode</strong> at the top right. Click <strong>Load unpacked</strong> and choose the <code>antivertising</code> folder.</p></div></li>
+          <li><div><h3>Check it works</h3>
+            <p>Open the <a href="test/">test page</a>. It is a fake newspaper full of fake ads, and every one should flip.</p></div></li>
+        </ol>
+        <p class="small after">To update later, download again, replace what's in the folder, and press the reload arrow on the Antivertising card. Don't remove the extension, or your score resets.</p>
+      </div>
+
+      <div class="browser" id="for-firefox">
+        <div class="fx-signed">
+          <p class="why">Signed by Mozilla and installed straight from this page. It isn't listed on Mozilla's add-ons site.</p>
+          <ol class="install">
+            <li><div><h3>Add it</h3>
+              <a class="btn" href="antivertising.xpi">Add to Firefox</a>
+              <p>Firefox asks twice. Choose <strong>Continue to Installation</strong>, then <strong>Add</strong>. The button only works in Firefox itself.</p></div></li>
+            <li><div><h3>Check it works</h3>
+              <p>Open the <a href="test/">test page</a>. It is a fake newspaper full of fake ads, and every one should flip.</p></div></li>
+          </ol>
+          <p class="small after">Firefox keeps it up to date by itself.</p>
+        </div>
+        <div class="fx-unsigned">
+          <p class="why">Firefox only keeps add-ons that Mozilla has signed, and this one is still waiting for that. Until then it loads for one session: Firefox drops it, and your score, when you quit.</p>
+          <ol class="install">
+            <li><div><h3>Download it</h3>
+              <a class="btn" href="antivertising-firefox.zip" download>Download antivertising-firefox.zip</a>
+              <p>Leave it zipped.</p></div></li>
+            <li><div><h3>Open the debugging page</h3>
+              <p>Paste this into the address bar. Browsers don't allow links to it.</p>
+              <div class="copyrow"><code id="fx-url">about:debugging#/runtime/this-firefox</code><button type="button" data-copy="fx-url">Copy</button></div></div></li>
+            <li><div><h3>Load the file</h3>
+              <p>Click <strong>Load Temporary Add-on…</strong> and choose the zip you downloaded.</p></div></li>
+            <li><div><h3>Check it works</h3>
+              <p>Open the <a href="test/">test page</a>. It is a fake newspaper full of fake ads, and every one should flip.</p></div></li>
+          </ol>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -398,6 +445,22 @@
     chip.addEventListener('click', function () { input.value = chip.textContent; answer(); });
   });
   answer();
+
+  // ---- install: show the steps for the browser being used ----
+  function pickBrowser(name) {
+    $('for-chrome').hidden = name !== 'chrome';
+    $('for-firefox').hidden = name !== 'firefox';
+    document.querySelectorAll('.pick button').forEach(function (button) {
+      button.setAttribute('aria-pressed', String(button.getAttribute('data-browser') === name));
+    });
+  }
+  document.querySelectorAll('.pick button').forEach(function (button) {
+    button.addEventListener('click', function () { pickBrowser(button.getAttribute('data-browser')); });
+  });
+  // Firefox on a computer. The add-on does not run in Firefox on phones.
+  var isFirefox = /\bFirefox\//.test(navigator.userAgent) && !/Android|Mobile|Tablet/.test(navigator.userAgent);
+  pickBrowser(isFirefox ? 'firefox' : 'chrome');
+  if (isFirefox) $('cta').textContent = 'Get it for Firefox';
 
   document.querySelectorAll('[data-copy]').forEach(function (button) {
     button.addEventListener('click', function () {

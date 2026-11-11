@@ -115,7 +115,7 @@
   globalThis.AVCollect = collect;
 
   /*
-   * Frame handshake: how the top frame learns which Chrome frame id belongs
+   * Frame handshake: how the top frame learns which of the browser's frame ids belongs
    * to which <iframe> element, something no API will tell a content script.
    *
    *   1. Each frame directly under the top frame makes up a random token and
