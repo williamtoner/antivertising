@@ -128,10 +128,14 @@
 </div>
 
 <script>
-  // Ad frames are served from the "other" loopback name so that they are
-  // cross-origin to this page, exactly like real third-party ad iframes.
+  // Run locally, ad frames are served from the "other" loopback name so that
+  // they are cross-origin to this page, exactly like real third-party ad
+  // iframes. On the public site (or with ?same) they come from next door.
+  var local = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
   var other = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
-  var base = location.protocol + '//' + other + (location.port ? ':' + location.port : '') + '/ads/';
+  var base = local && !/[?&]same\b/.test(location.search)
+    ? location.protocol + '//' + other + (location.port ? ':' + location.port : '') + '/ads/'
+    : new URL('ads/', location.href).href;
   document.querySelectorAll('iframe[data-ad]').forEach(function (f) { f.src = base + f.getAttribute('data-ad'); });
 </script>
 </body>
