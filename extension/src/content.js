@@ -284,7 +284,19 @@
     var cs = getComputedStyle(target);
 
     var entry = { slot: slot, target: target, host: null, display: target.style.getPropertyValue('display'), priority: target.style.getPropertyPriority('display') };
-    var host = AV.renderCard(creative, { width: rect.width, height: rect.height }, function () { undo(entry); });
+    var host = AV.renderCard(creative, { width: rect.width, height: rect.height }, function () { undo(entry); }, function () {
+      send({
+        type: 'av-share',
+        share: {
+          paid: AV.paidText(creative),
+          name: creative.name,
+          line: creative.line,
+          cta: creative.cta || '',
+          color: creative.color,
+          page: location.hostname
+        }
+      });
+    });
     entry.host = host;
 
     // Sit exactly where the ad sat.

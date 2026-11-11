@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Antivertising: ads aren't blocked, they're betrayed</title>
+<meta name="description" content="A free browser extension that doesn't block ads. It replaces each one with an ad for the advertiser's worst enemy. Pepsi pays, Coke gets the space.">
+<meta property="og:title" content="Antivertising">
+<meta property="og:description" content="Pepsi paid for this ad. It says Coca-Cola now. A browser extension that turns every ad against whoever paid for it.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://williamtoner.net/antivertising/">
+<meta property="og:image" content="https://williamtoner.net/antivertising/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="icon.png">
+<style>
+  /* Layout: one column, 68rem at most. Hero is two columns (claim, live card) that stack on phones. */
+  @font-face {
+    font-family: "AV Archivo";
+    src: url("av/archivo.woff2") format("woff2");
+    font-weight: 100 900;
+    font-stretch: 62% 125%;
+    font-display: swap;
+  }
+  :root {
+    --ink: #111111;
+    --panel: #1a1916;
+    --line: #34322a;
+    --text: #f3f0e4;
+    --muted: #a39f8e;
+    --hazard: #ffd60a;
+    --wrap: 68rem;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--text);
+    font: 400 1.0625rem/1.55 "AV Archivo", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    border-top: 10px solid var(--hazard);
+    -webkit-text-size-adjust: 100%;
+  }
+  a { color: var(--hazard); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--text); outline-offset: 3px; }
+  .wrap { max-width: var(--wrap); margin: 0 auto; padding: 0 clamp(16px, 4vw, 40px); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+  /* top bar */
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 22px; }
+  .wordmark { color: var(--hazard); font-weight: 900; font-stretch: 125%; font-size: 1.15rem; letter-spacing: -0.01em; text-transform: uppercase; text-decoration: none; }
+  .bar nav { display: flex; gap: clamp(12px, 3vw, 28px); font-weight: 600; font-size: 0.95rem; }
+  .bar nav a { color: var(--text); text-decoration: none; }
+  .bar nav a:hover { color: var(--hazard); }
+  @media (max-width: 520px) { .bar nav a.opt { display: none; } }
+
+  /* hero */
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); gap: clamp(28px, 5vw, 64px); align-items: center; padding-block: clamp(28px, 6vw, 72px) clamp(48px, 8vw, 96px); }
+  @media (max-width: 800px) { .hero { grid-template-columns: 1fr; } }
+  h1 {
+    margin: 0;
+    font-weight: 900; font-stretch: 75%;
+    font-size: clamp(2.7rem, 8.6vw, 5.6rem); line-height: 0.94; letter-spacing: -0.02em;
+    min-height: 3.76em; /* four lines, so the page does not jump as the names change */
+    text-wrap: balance;
+  }
+  h1 .now { display: block; color: var(--hazard); margin-top: 0.12em; }
+  #h-paid, #h-now { white-space: nowrap; }
+  .lede { max-width: 34rem; margin: 1.6rem 0 0; font-size: clamp(1.05rem, 1.6vw, 1.25rem); color: var(--text); }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 1.8rem; }
+  .btn {
+    display: inline-block; padding: 0.85rem 1.25rem 0.8rem; border: 2px solid var(--hazard); border-radius: 2px;
+    background: var(--hazard); color: var(--ink); font: inherit; font-weight: 800; text-decoration: none; cursor: pointer;
+  }
+  .btn.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.ghost:hover { border-color: var(--hazard); filter: none; }
+  .small { color: var(--muted); font-size: 0.9rem; }
+  .cta-row + .small { margin-top: 0.9rem; }
+
+  /* a slot a card is drawn into */
+  .stage { position: relative; width: 100%; aspect-ratio: 6 / 5; background: #26251f; overflow: hidden; box-shadow: 0 0 0 1px #45423a; }
+  .stage .was {
+    position: absolute; inset: 0; display: grid; place-content: center; gap: 4px; text-align: center;
+    color: #77735f; font-weight: 700; font-stretch: 87.5%; font-size: 0.8rem; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .stage .was b { display: block; color: #b7b29b; font-size: 1.5rem; font-weight: 900; font-stretch: 100%; letter-spacing: -0.01em; text-transform: none; }
+  .stage > [data-antivertising] { position: absolute !important; inset: 0 !important; }
+  .demo-note { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-top: 10px; }
+  .linkbtn { border: 0; background: none; padding: 0; color: var(--muted); font: inherit; font-size: 0.9rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .linkbtn:hover { color: var(--hazard); }
+
+  /* sections */
+  section.band { border-top: 1px solid var(--line); padding-block: clamp(44px, 7vw, 88px); }
+  section.band.lit { background: var(--panel); }
+  .eyebrow { margin: 0 0 0.9rem; color: var(--hazard); font-weight: 700; font-stretch: 87.5%; font-size: 0.8rem; letter-spacing: 0.14em; text-transform: uppercase; }
+  h2 { margin: 0; max-width: 22ch; font-weight: 900; font-stretch: 75%; font-size: clamp(2rem, 5vw, 3.4rem); line-height: 0.98; letter-spacing: -0.015em; text-wrap: balance; }
+  h2 + p { max-width: 40rem; margin: 1.1rem 0 0; color: var(--text); }
+  h3 { margin: 0 0 0.4rem; font-weight: 800; font-size: 1.15rem; line-height: 1.25; }
+
+  /* try it */
+  .try { display: grid; gap: 22px; margin-top: 2rem; }
+  .ask { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .ask input {
+    flex: 1 1 16rem; min-width: 0; padding: 0.85rem 1rem; border: 2px solid var(--line); border-radius: 2px;
+    background: var(--ink); color: var(--text); font: inherit; font-weight: 700; font-size: 1.15rem;
+  }
+  .ask input:focus { border-color: var(--hazard); outline: none; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips button {
+    padding: 0.35rem 0.7rem; border: 1px solid var(--line); border-radius: 2px; background: transparent; color: var(--text);
+    font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+  }
+  .chips button:hover { border-color: var(--hazard); color: var(--hazard); }
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 340px)); gap: 22px; }
+  .pair figure { margin: 0; }
+  .pair figcaption { margin-bottom: 8px; color: var(--muted); font-weight: 700; font-stretch: 87.5%; font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; }
+  #verdict { margin: 0; min-height: 1.6em; color: var(--muted); }
+
+  /* how it works */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: clamp(20px, 3vw, 36px); margin: 2.4rem 0 0; padding: 0; list-style: none; counter-reset: n; }
+  .steps li { counter-increment: n; border-top: 4px solid var(--hazard); padding-top: 0.9rem; }
+  .steps li::before { content: counter(n); display: block; margin-bottom: 0.3rem; color: var(--hazard); font-weight: 900; font-stretch: 125%; font-size: 2.4rem; line-height: 1; font-variant-numeric: tabular-nums; }
+  .steps p { margin: 0; color: var(--muted); }
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 14px 36px; margin: 2rem 0 0; padding: 0; list-style: none; }
+  .rules li { padding-left: 1.5rem; position: relative; }
+  .rules li::before { content: ""; position: absolute; left: 0; top: 0.55em; width: 0.7rem; height: 0.28rem; background: var(--hazard); }
+
+  /* install */
+  .install { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; margin: 2rem 0 0; padding: 0; list-style: none; counter-reset: s; max-width: 46rem; }
+  .install > li { counter-increment: s; display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: 0 0.8rem; padding: 1.1rem 0; border-top: 1px solid var(--line); }
+  .install > li::before { content: counter(s); color: var(--hazard); font-weight: 900; font-stretch: 125%; font-size: 1.7rem; line-height: 1.1; }
+  .install p { margin: 0.2rem 0 0; color: var(--muted); }
+  .install .btn { margin-top: 0.7rem; }
+  code { padding: 0.1em 0.4em; border: 1px solid var(--line); background: var(--ink); font: 0.92em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+  .copyrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 0.6rem; }
+  .copyrow button { padding: 0.25rem 0.6rem; border: 1px solid var(--line); border-radius: 2px; background: transparent; color: var(--text); font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+  .copyrow button:hover { border-color: var(--hazard); }
+
+  /* questions */
+  .faq { max-width: 46rem; margin-top: 1.8rem; }
+  details { border-top: 1px solid var(--line); }
+  details:last-child { border-bottom: 1px solid var(--line); }
+  summary { padding: 1rem 0; font-weight: 800; font-size: 1.1rem; cursor: pointer; }
+  details p { margin: 0 0 1.1rem; color: var(--muted); max-width: 40rem; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 28px 44px; color: var(--muted); font-size: 0.92rem; }
+  footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 24px; }
+  footer p { margin: 0; }
+</style>
+</head>
+<body>
+
+<header class="wrap bar">
+  <a class="wordmark" href="./">Antivertising</a>
+  <nav aria-label="Sections">
+    <a class="opt" href="#try">Try it</a>
+    <a class="opt" href="#how">How it works</a>
+    <a href="#install">Install</a>
+    <a href="https://github.com/williamtoner/antivertising">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div>
+      <h1><span id="h-paid">Pepsi</span> paid for this ad. <span class="now">It says <span id="h-now">Coca-Cola</span> now.</span></h1>
+      <p class="lede">Antivertising is a free browser extension. It doesn't block ads. It replaces each one with an ad for the advertiser's worst enemy, so the money spent reaching you works against whoever spent it.</p>
+      <div class="cta-row">
+        <a class="btn" href="#install">Get it for Chrome</a>
+        <a class="btn ghost" href="#try">Try it without installing</a>
+      </div>
+      <p class="small">Free and open source. Nothing leaves your browser.</p>
+    </div>
+    <div>
+      <div class="stage" id="hero-stage" aria-hidden="true">
+        <div class="was">Ad space bought by<b id="hero-was">Pepsi</b></div>
+      </div>
+      <div class="demo-note">
+        <span class="small">These are the cards the extension draws.</span>
+        <button type="button" class="linkbtn" id="hero-pause" aria-pressed="false">Pause</button>
+      </div>
+    </div>
+  </div>
+
+  <section class="band lit" id="try">
+    <div class="wrap">
+      <p class="eyebrow">Try it</p>
+      <h2>Name a brand. See who gets its ad.</h2>
+      <p>The same matching runs here as in the extension. It knows about 1,500 brands, in English and Japanese.</p>
+      <div class="try">
+        <div class="ask">
+          <label class="sr" for="brand">A brand name</label>
+          <input id="brand" type="text" value="Nike" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="A brand, or its web address">
+        </div>
+        <div class="chips" aria-label="Examples">
+          <button type="button">Toyota</button>
+          <button type="button">Netflix</button>
+          <button type="button">楽天市場</button>
+          <button type="button">DraftKings</button>
+          <button type="button">NordVPN</button>
+          <button type="button">Uber Eats</button>
+          <button type="button">ikea.jp</button>
+        </div>
+        <p id="verdict" role="status"></p>
+        <div class="pair">
+          <figure id="fig-rival">
+            <figcaption>Its rival gets the space</figcaption>
+            <div class="stage" id="stage-rival"></div>
+          </figure>
+          <figure id="fig-nemesis">
+            <figcaption>Or its nemesis does</figcaption>
+            <div class="stage" id="stage-nemesis"></div>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="how">
+    <div class="wrap">
+      <p class="eyebrow">How it works</p>
+      <h2>Advertisers pay for your attention. This spends it elsewhere.</h2>
+      <ol class="steps">
+        <li><h3>It finds the ad</h3><p>Banners, sidebars and sponsored boxes are spotted as the page loads. The rest of the page is left alone.</p></li>
+        <li><h3>It works out who paid</h3><p>From where the ad leads and what it says. No pictures are read and nothing is looked up online.</p></li>
+        <li><h3>It hands over the space</h3><p>To the arch-rival where there is one. A Pepsi ad becomes a Coke ad. McDonald's becomes Burger King.</p></li>
+      </ol>
+      <ul class="rules">
+        <li><strong>Some industries get no rival.</strong> Gambling, lenders and cosmetic clinics are replaced by the thing that makes them pointless, such as Keeping Your Money.</li>
+        <li><strong>Unknown advertisers get heckled.</strong> If it can't tell who paid, the space says Not Buying It.</li>
+        <li><strong>Nobody pays for placement.</strong> No brand named here is involved, asked or charged.</li>
+        <li><strong>You can always undo it.</strong> Hover the black strip on any card to get the real ad back.</li>
+        <li><strong>Nothing leaves your browser.</strong> No account, no tracking, no server. The brand list ships inside the extension.</li>
+        <li><strong>The code is public.</strong> Read it, change it, add your country's brands.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band lit" id="install">
+    <div class="wrap">
+      <p class="eyebrow">Install</p>
+      <h2>About a minute, on a computer.</h2>
+      <p>Works in Chrome, Edge, Brave and Arc. It isn't in the Chrome Web Store, so you load it by hand. Not on phones, Safari or Firefox yet.</p>
+      <ol class="install">
+        <li><div><h3>Download it</h3>
+          <a class="btn" href="antivertising.zip" download>Download antivertising.zip</a></div></li>
+        <li><div><h3>Unzip it</h3>
+          <p>Double-click the file. You get a folder called <code>antivertising</code>. Move it somewhere it can stay, such as Documents: the browser runs it from that folder.</p></div></li>
+        <li><div><h3>Open the extensions page</h3>
+          <p>Paste this into the address bar. Browsers don't allow links to it.</p>
+          <div class="copyrow"><code id="ext-url">chrome://extensions</code><button type="button" data-copy="ext-url">Copy</button></div></div></li>
+        <li><div><h3>Load the folder</h3>
+          <p>Switch on <strong>Developer mode</strong> at the top right. Click <strong>Load unpacked</strong> and choose the <code>antivertising</code> folder.</p></div></li>
+        <li><div><h3>Check it works</h3>
+          <p>Open the <a href="test/">test page</a>. It is a fake newspaper full of fake ads, and every one should flip.</p></div></li>
+      </ol>
+      <p class="small" style="max-width:46rem;margin-top:1.4rem">To update later, download again, replace what's in the folder, and press the reload arrow on the Antivertising card. Don't remove the extension, or your score resets.</p>
+    </div>
+  </section>
+
+  <section class="band" id="questions">
+    <div class="wrap">
+      <p class="eyebrow">Questions</p>
+      <h2>Fair things to ask.</h2>
+      <div class="faq">
+        <details><summary>Is this an ad blocker?</summary>
+          <p>No. The ad still loads and the advertiser still pays for it. You just see something else in its place. If you want fewer ads, use a blocker. This is for when you'd like them to backfire.</p></details>
+        <details><summary>Do the rival brands pay for this?</summary>
+          <p>No, and they never will. Nobody named on a card is involved. The cards are made up by the extension, and each one says who originally paid for the space.</p></details>
+        <details><summary>Why did an ad turn into "Not Buying It"?</summary>
+          <p>The extension couldn't tell who the advertiser was. That happens most with ads that are only a picture. You can turn the heckling off in the extension's menu and leave those ads alone.</p></details>
+        <details><summary>What does it know about me?</summary>
+          <p>Nothing that leaves your computer. It keeps a score and, if you leave the option on, a log of ads it replaced. Both stay in your browser. You can export or clear the log from the menu.</p></details>
+        <details><summary>A brand is missing, or matched wrongly.</summary>
+          <p>The list is a plain file in the project. Open an issue on <a href="https://github.com/williamtoner/antivertising">GitHub</a>, or add the brand yourself and send it in.</p></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Made by <a href="https://williamtoner.net/">William Toner</a>. Not affiliated with any brand named on this page.</p>
+    <p><a href="https://github.com/williamtoner/antivertising">Source on GitHub</a> · MIT licence</p>
+  </div>
+</footer>
+
+<script src="av/data.js"></script>
+<script src="av/data-more.js"></script>
+<script src="av/data-new.js"></script>
+<script src="av/engine.js"></script>
+<script src="av/card.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  function lookUp(text, mode) {
+    text = text.trim();
+    var isAddress = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(text);
+    var match = AV.identify({ urls: [], links: isAddress ? ['https://' + text + '/'] : [], text: text });
+    return { match: match, creative: AV.pickCounter(match, { mode: mode }) };
+  }
+
+  // Draw a card to fill a stage. Cards are sized in pixels, so they are redrawn if the stage changes size.
+  function mount(stage, creative) {
+    var old = stage.querySelector('[data-antivertising]');
+    if (old) old.remove();
+    if (!creative) { stage._creative = null; return; }
+    stage._creative = creative;
+    stage.appendChild(AV.renderCard(creative, { width: stage.clientWidth, height: stage.clientHeight }));
+  }
+  var stages = [$('hero-stage'), $('stage-rival'), $('stage-nemesis')];
+  var resizeTimer = null;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function () {
+      stages.forEach(function (stage) { if (stage._creative) mount(stage, stage._creative); });
+    }, 150);
+  });
+
+  // ---- hero: a slot that keeps getting bought and betrayed ----
+  var SAMPLES = ['Pepsi', 'McDonald’s', 'Nike', 'DraftKings', 'Netflix', 'Toyota', 'Coinbase', 'NordVPN', 'Uber', 'Samsung'];
+  var at = 0;
+  var paused = false;
+  var timer = null;
+
+  function showSample() {
+    var found = lookUp(SAMPLES[at].replace('’', "'"), 'auto');
+    var creative = found.creative;
+    var paid = creative.original || SAMPLES[at];
+    mount($('hero-stage'), null);
+    $('hero-was').textContent = paid;
+    timer = setTimeout(function () {
+      $('h-paid').textContent = paid;
+      $('h-now').textContent = creative.name;
+      mount($('hero-stage'), creative);
+      timer = setTimeout(next, 3200);
+    }, 650);
+  }
+  function next() {
+    if (paused) return;
+    at = (at + 1) % SAMPLES.length;
+    showSample();
+  }
+  $('hero-pause').addEventListener('click', function () {
+    paused = !paused;
+    this.textContent = paused ? 'Play' : 'Pause';
+    this.setAttribute('aria-pressed', String(paused));
+    clearTimeout(timer);
+    if (!paused) next();
+  });
+  document.addEventListener('visibilitychange', function () {
+    clearTimeout(timer);
+    if (!document.hidden && !paused) timer = setTimeout(next, 1200);
+  });
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    paused = true;
+    $('hero-pause').textContent = 'Play';
+    $('hero-pause').setAttribute('aria-pressed', 'true');
+  }
+  showSample();
+
+  // ---- try it ----
+  var input = $('brand');
+  function answer() {
+    var text = input.value;
+    if (!text.trim()) {
+      $('verdict').textContent = 'Type a brand to see what its ads turn into.';
+      mount($('stage-rival'), null);
+      mount($('stage-nemesis'), null);
+      return;
+    }
+    var rival = lookUp(text, 'rival');
+    var nemesis = lookUp(text, 'nemesis');
+    var match = rival.match;
+    var hasRival = rival.creative.kind === 'rival';
+    $('fig-rival').hidden = !hasRival;
+    $('fig-nemesis').hidden = false;
+    $('fig-nemesis').querySelector('figcaption').textContent =
+      !match.category ? 'What unknown ads become' : hasRival ? 'Or its nemesis does' : 'Its nemesis gets the space';
+    if (hasRival) mount($('stage-rival'), rival.creative);
+    mount($('stage-nemesis'), nemesis.creative);
+    if (match.brand) {
+      $('verdict').textContent = 'Recognised as ' + match.brand.name + ', in ' + match.category.label + '.' +
+        (hasRival ? '' : ' This industry never gets a rival, only the nemesis.');
+    } else if (match.category) {
+      $('verdict').textContent = 'No brand recognised, but it reads like an ad for ' + match.category.label + '.';
+    } else {
+      $('verdict').textContent = 'Not in the list yet. An ad the extension can’t place gets heckled instead.';
+    }
+  }
+  var typing = null;
+  input.addEventListener('input', function () { clearTimeout(typing); typing = setTimeout(answer, 180); });
+  document.querySelectorAll('.chips button').forEach(function (chip) {
+    chip.addEventListener('click', function () { input.value = chip.textContent; answer(); });
+  });
+  answer();
+
+  document.querySelectorAll('[data-copy]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      var text = $(button.getAttribute('data-copy')).textContent;
+      var label = button.textContent;
+      var done = function (word) { button.textContent = word; setTimeout(function () { button.textContent = label; }, 1500); };
+      try { navigator.clipboard.writeText(text).then(function () { done('Copied'); }, function () { done('Select and copy it'); }); }
+      catch (e) { done('Select and copy it'); }
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -8,6 +8,10 @@ var HINTS = {
   nemesis: 'Always the opposed industry. A Pepsi ad becomes an ad for tap water.'
 };
 
+var SITE = 'https://williamtoner.net/antivertising/';
+// A rough market price for one display ad view, in US dollars.
+var PER_VIEW = 0.003;
+
 var $ = function (id) { return document.getElementById(id); };
 var state = {};
 var host = null;
@@ -34,6 +38,9 @@ function render() {
 
   var stats = state.stats || { total: 0, victims: {} };
   $('total').textContent = String(stats.total);
+  var wasted = stats.total * PER_VIEW;
+  $('waste').textContent = stats.total === 0 ? '' :
+    'About ' + (wasted < 1 ? Math.max(1, Math.round(wasted * 100)) + '\u00a2' : '$' + wasted.toFixed(2)) + ' of ad money wasted';
   var victims = Object.keys(stats.victims || {})
     .map(function (name) { return { name: name, n: stats.victims[name] }; })
     .sort(function (a, b) { return b.n - a.n; })
@@ -70,6 +77,18 @@ $('pause').addEventListener('change', function (e) {
   var hosts = state.pausedHosts.filter(function (h) { return h !== host; });
   if (e.target.checked) hosts.push(host);
   save({ pausedHosts: hosts });
+});
+$('site').href = SITE;
+$('share-score').addEventListener('click', function () {
+  var stats = state.stats || { total: 0, victims: {} };
+  var victims = Object.keys(stats.victims || {})
+    .filter(function (name) { return name !== 'Unidentified advertisers' && !/\(brand unknown\)$/.test(name); })
+    .map(function (name) { return { name: name, n: stats.victims[name] }; })
+    .sort(function (a, b) { return b.n - a.n; })
+    .slice(0, 5);
+  chrome.tabs.create({
+    url: chrome.runtime.getURL('share/share.html') + '#' + encodeURIComponent(JSON.stringify({ total: stats.total, victims: victims }))
+  });
 });
 $('reset').addEventListener('click', function () { save({ stats: null }); });
 $('logging').addEventListener('change', function (e) { save({ logging: e.target.checked }); });

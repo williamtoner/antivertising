@@ -1,0 +1,26 @@
+@font-face {
+  font-family: "AV Archivo";
+  src: url("../fonts/archivo.woff2") format("woff2");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+}
+:root { --ink: #111111; --line: #2e2e2e; --text: #f4f1e8; --muted: #a39f93; --hazard: #ffd60a; color-scheme: dark; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  min-height: 100vh; background: var(--ink); color: var(--text);
+  font: 15px/1.5 "AV Archivo", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+}
+main { max-width: 860px; margin: 0 auto; padding: 40px 20px 56px; display: grid; gap: 20px; }
+h1 { font-size: 22px; font-weight: 900; font-stretch: 125%; letter-spacing: -0.01em; text-transform: uppercase; color: var(--hazard); line-height: 1; }
+header p { margin-top: 6px; color: var(--muted); }
+canvas { display: block; width: 100%; height: auto; border: 1px solid var(--line); }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.actions button, .actions a {
+  font: inherit; font-weight: 700; cursor: pointer; text-decoration: none;
+  padding: 10px 16px; border: 1px solid var(--line); border-radius: 2px; background: transparent; color: var(--text);
+}
+.actions .primary { background: var(--hazard); border-color: var(--hazard); color: var(--ink); }
+.actions button:hover, .actions a:hover { border-color: var(--hazard); }
+.actions button:focus-visible, .actions a:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.status { min-height: 1.5em; color: var(--hazard); }
+.note { color: var(--muted); font-size: 13px; }

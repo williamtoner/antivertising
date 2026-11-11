@@ -20,11 +20,17 @@
 
   <section class="score">
     <div class="total"><span id="total">0</span></div>
-    <div class="total-label">ads turned against<br>whoever paid for them</div>
+    <div class="score-text">
+      <div class="total-label">ads turned against<br>whoever paid for them</div>
+      <div class="waste" id="waste" title="A rough guess, at 3 US dollars per thousand ad views."></div>
+    </div>
   </section>
 
   <section id="victims-section" hidden>
-    <h2>Most sabotaged</h2>
+    <div class="head">
+      <h2>Most sabotaged</h2>
+      <button type="button" id="share-score">Share score</button>
+    </div>
     <ol id="victims"></ol>
   </section>
 
@@ -67,7 +73,7 @@
 
   <footer>
     <button type="button" id="reset">Reset score</button>
-    <span>Nothing leaves your browser.</span>
+    <span>Nothing leaves your browser. <a id="site" target="_blank" rel="noopener noreferrer">Website</a></span>
   </footer>
 
   <script src="popup.js"></script>

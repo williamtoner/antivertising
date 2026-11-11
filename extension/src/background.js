@@ -193,6 +193,19 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     return true; // answering asynchronously
   }
 
+  if (msg.type === 'av-share' && msg.share && typeof msg.share === 'object') {
+    // The picture is drawn on one of our own pages, not on the site.
+    var share = {};
+    ['paid', 'name', 'line', 'cta', 'color', 'page'].forEach(function (k) {
+      if (typeof msg.share[k] === 'string') share[k] = msg.share[k].slice(0, 300);
+    });
+    chrome.tabs.create({
+      url: chrome.runtime.getURL('share/share.html') + '#' + encodeURIComponent(JSON.stringify(share)),
+      index: sender.tab.index + 1
+    });
+    return;
+  }
+
   if (msg.type === 'av-swapped') {
     recordSwap(msg);
     setBadge(sender.tab.id, msg.count | 0);

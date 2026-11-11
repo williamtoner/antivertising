@@ -4,7 +4,11 @@ An ad "blocker" that doesn't block. It replaces each ad with the one its adverti
 
 A Pepsi ad becomes a Coke ad. A sportsbook ad becomes an ad for keeping your money. An ad for a car nobody named becomes an ad for the bus.
 
+**Website, live demo and download: <https://williamtoner.net/antivertising/>**
+
 ![The demo page after Antivertising has been at it](docs/demo.png)
+
+Every card carries a black strip saying who paid for the space. Hover it for **Show original** (puts the real ad back) and **Share** (draws a picture of the swap for you to post).
 
 ## Try it
 
@@ -73,6 +77,16 @@ That is: id, name, colour, domains, arch-rival, aliases, and an optional final `
 
 Run the tests after editing. They check the database for duplicate domains and names, missing arch-rivals and brands that could be replaced by themselves.
 
+## The website
+
+`site/` is the public page. It loads the extension's own engine, card renderer and typeface, so the demo on it is the real thing, not a mock-up. Build it, with a fresh zip of the extension for the download button, into `dist/site`:
+
+```bash
+python3 tools/build_site.py
+```
+
+Pushing to `main` builds and publishes it through GitHub Pages (`.github/workflows/site.yml`).
+
 ## Tests
 
 ```bash
@@ -113,3 +127,7 @@ The handshake runs child-to-parent because ad scripts build their frames with `d
 - **The long tail is long.** The list is about 1,500 names, mostly American and Japanese. Local shops and small campaigns are not in it. Check the exported ad log to see who is being missed.
 - **The fixed `key` in the manifest** keeps the extension's ID, and therefore its score and log, the same wherever the folder is loaded from. Remove it before submitting to the Chrome Web Store.
 - The original ad still loads before it is replaced, so its advertiser may still be billed for the impression. Arguably a feature.
+
+## Licence
+
+MIT; see [LICENSE](LICENSE). The typeface on the cards is [Archivo](https://github.com/Omnibus-Type/Archivo) under the SIL Open Font License. Brand names belong to their owners and are used only to say whose ad was replaced and who its competitors are. No brand is affiliated with this project or pays for placement.

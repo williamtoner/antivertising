@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Share · Antivertising</title>
+  <link rel="stylesheet" href="share.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Antivertising</h1>
+      <p id="what">A picture of the swap, ready to post.</p>
+    </header>
+    <canvas id="picture" width="1200" height="675" role="img" aria-label="Picture of the swap"></canvas>
+    <div class="actions">
+      <button type="button" id="save" class="primary">Save image</button>
+      <button type="button" id="copy">Copy image</button>
+      <button type="button" id="caption">Copy caption</button>
+      <a id="post" target="_blank" rel="noopener noreferrer">Post on X</a>
+    </div>
+    <p class="status" id="status" role="status"></p>
+    <p class="note">The picture is drawn here in your browser. Nothing is uploaded unless you post it yourself.</p>
+  </main>
+  <script src="../src/card.js"></script>
+  <script src="share.js"></script>
+</body>
+</html>
