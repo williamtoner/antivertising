@@ -1,0 +1,53 @@
+name: Firefox catalogue
+
+# Sends the add-on to Mozilla's public catalogue (addons.mozilla.org) and
+# keeps its page there in step with listing/. Run by hand, from the Actions
+# tab: putting something in a public catalogue should be a decision each time.
+#
+# Run it again whenever you like. A version Mozilla already has is not sent
+# twice; the page's text and screenshots are refreshed every time.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firefox-catalogue
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    env:
+      # The same Mozilla API key the site workflow signs with.
+      WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+      WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        run: node test/engine.test.js
+
+      - name: Build the catalogue copy and run Mozilla's checks on it
+        run: |
+          python3 tools/build_firefox.py --listed build/antivertising-listed.zip
+          unzip -q build/antivertising-listed.zip -d build/listed
+          npx --yes web-ext@10 lint --warnings-as-errors --source-dir build/listed
+
+      - name: Send a new version to the catalogue
+        run: |
+          version=$(python3 -c "import sys; sys.path.insert(0, 'tools'); import build_firefox; print(build_firefox.version(listed=True))")
+          if python3 tools/amo_listing.py has-version "$version"; then
+            echo "Mozilla already has $version."
+            exit 0
+          fi
+          # Do not wait for the review: it can take minutes or days.
+          npx --yes web-ext@10 sign --channel listed --approval-timeout 0 \
+            --amo-metadata listing/firefox.json \
+            --source-dir build/listed --artifacts-dir build/signed
+
+      - name: Refresh the page's text and screenshots
+        run: python3 tools/amo_listing.py sync
+
+      - name: Where it stands
+        run: python3 tools/amo_listing.py status

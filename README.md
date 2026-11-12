@@ -97,6 +97,18 @@ For that it needs a Mozilla API key in two repository secrets, `AMO_JWT_ISSUER` 
 
 Mozilla signs each version number once. If a run sends a version and then fails before making the release, download the signed file from the [developer hub](https://addons.mozilla.org/developers/addons) and attach it to a release called `v<version>` by hand, or raise the version and push again.
 
+### Mozilla's catalogue
+
+The add-on can also go in Mozilla's public catalogue, addons.mozilla.org, where people find it by searching and Mozilla does the updating. That is a second build, because the catalogue refuses an add-on that names its own update feed:
+
+```bash
+python3 tools/build_firefox.py --listed
+```
+
+It is the same code with no update feed and with `.1` on the end of the version (`0.3.0` becomes `0.3.0.1`), because Mozilla takes each version number once and the website copy has used the plain one.
+
+Sending it is a workflow you start by hand: **Actions → Firefox catalogue → Run workflow** (`.github/workflows/listing.yml`). It sends the version if Mozilla does not have it yet, and makes the catalogue page match `listing/`: the text and reviewer notes in `listing/firefox.json`, and the screenshots named in `listing/screenshots.json`. Mozilla may review a version before or after it appears, and can turn it down. The website copy does not depend on any of this.
+
 ## The website
 
 `site/` is the public page. It loads the extension's own engine, card renderer and typeface, so the demo on it is the real thing, not a mock-up. Build it, with fresh copies of the extension for the download buttons, into `dist/site`:
