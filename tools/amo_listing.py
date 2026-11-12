@@ -120,9 +120,9 @@ def same(ours, theirs):
 def sync(fresh_screenshots=False):
     """Make the listing's text and screenshots match the files in listing/.
 
-    Only what differs is sent, because Mozilla rations changes. Screenshots
-    are matched by position: a picture already in a slot is kept, and only
-    its caption is corrected. To replace the pictures themselves, pass
+    Only what differs is sent, because Mozilla rations changes. A screenshot
+    Mozilla already holds is recognised by its caption and left alone, in
+    whatever order Mozilla lists it. To replace the pictures themselves, pass
     --fresh-screenshots, which removes them all first.
     """
     text = json.loads((LISTING / "firefox.json").read_text())
@@ -130,31 +130,44 @@ def sync(fresh_screenshots=False):
     addon = call("GET", "?show_source=true")
     changed = {key: value for key, value in text.items() if not same(value, addon.get(key))}
     if changed:
+        for key in sorted(changed):
+            # Shown so that a field which never compares equal can be tracked down.
+            print("  %s differs; Mozilla has %s" % (key, json.dumps(addon.get(key), ensure_ascii=False)[:160]), flush=True)
         call("PATCH", body=changed)
         print("listing text sent: %s" % ", ".join(sorted(changed)), flush=True)
     else:
         print("listing text is already up to date", flush=True)
 
     wanted = json.loads((LISTING / "screenshots.json").read_text())
-    there = sorted(addon.get("previews", []), key=lambda preview: preview.get("position", 0))
+    there = list(addon.get("previews", []))
     if fresh_screenshots:
         for old in there:
             call("DELETE", "previews/%s/" % old["id"])
         there = []
-    for extra in there[len(wanted):]:
-        call("DELETE", "previews/%s/" % extra["id"])
-    for position, shot in enumerate(wanted):
-        if position < len(there):
-            preview = there[position]
+    # Pictures already up, by caption.
+    missing = []
+    for shot in wanted:
+        held = next((p for p in there if same({"en-US": shot["caption"]}, p.get("caption"))), None)
+        if held:
+            there.remove(held)
         else:
-            body, content_type = multipart({"position": position}, "image", LISTING / shot["file"])
+            missing.append(shot)
+    # What is left over on Mozilla's side is either a picture still waiting for
+    # its caption or one we no longer want.
+    for shot in missing:
+        if there:
+            preview = there.pop(0)
+        else:
+            body, content_type = multipart({"position": wanted.index(shot)}, "image", LISTING / shot["file"])
             preview = call("POST", "previews/", body, content_type)
             print("screenshot sent: %s" % shot["file"], flush=True)
         # A caption cannot go up with its picture, so it follows.
-        caption = {"en-US": shot["caption"]}
-        if not same(caption, preview.get("caption")):
-            call("PATCH", "previews/%s/" % preview["id"], {"caption": caption})
-            print("caption sent: %s" % shot["file"], flush=True)
+        call("PATCH", "previews/%s/" % preview["id"], {"caption": {"en-US": shot["caption"]}})
+        print("caption sent: %s" % shot["file"], flush=True)
+    for extra in there:
+        call("DELETE", "previews/%s/" % extra["id"])
+    if not missing:
+        print("screenshots are already up to date", flush=True)
 
 
 def status():
