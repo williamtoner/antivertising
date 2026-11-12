@@ -3,6 +3,7 @@
 
     python3 tools/amo_listing.py has-version 0.3.0.1   exit 0 if Mozilla already has it
     python3 tools/amo_listing.py sync                  send the text and screenshots in listing/
+    python3 tools/amo_listing.py sync --fresh-screenshots   the same, replacing every picture
     python3 tools/amo_listing.py status                print where the listing stands
 
 Sending a new version is not done here: `web-ext sign --channel listed` does
@@ -50,10 +51,19 @@ def token():
     return (signed + b"." + b64(hmac.new(secret.encode(), signed, hashlib.sha256).digest())).decode()
 
 
+# Mozilla limits how often a listing may be changed, by the minute and by the
+# hour. A short wait is worth sitting out; a long one is not.
+LONGEST_PAUSE = 90
+
+
+class ComeBackLater(Exception):
+    """Mozilla will not take more changes for a while."""
+
+
 def call(method, path="", body=None, content_type="application/json"):
     """One API call. Returns the decoded answer, if there is one."""
     data = json.dumps(body).encode() if content_type == "application/json" and body is not None else body
-    for attempt in range(8):
+    for attempt in range(4):
         request = urllib.request.Request(API + path, data=data, method=method)
         request.add_header("Authorization", "JWT " + token())
         request.add_header("User-Agent", "antivertising-listing")
@@ -65,12 +75,14 @@ def call(method, path="", body=None, content_type="application/json"):
             return json.loads(text) if text else None
         except urllib.error.HTTPError as error:
             answer = error.read().decode()[:2000]
-            # Mozilla allows only a few changes a minute, and says how long to wait.
             wait = re.search(r"available in (\d+) second", answer)
-            if error.code != 429 or not wait or attempt == 7:
+            if error.code != 429 or not wait:
                 raise SystemExit("%s %s%s failed: %s\n%s" % (method, API, path, error.code, answer))
-            print("Mozilla asks for a pause of %s seconds" % wait.group(1), flush=True)
-            time.sleep(int(wait.group(1)) + 2)
+            seconds = int(wait.group(1))
+            if seconds > LONGEST_PAUSE or attempt == 3:
+                raise ComeBackLater(seconds)
+            print("Mozilla asks for a pause of %d seconds" % seconds, flush=True)
+            time.sleep(seconds + 2)
 
 
 def multipart(fields, file_field, file_path):
@@ -96,22 +108,53 @@ def has_version(number):
     return any(version["version"] == number for version in versions())
 
 
-def sync():
-    """Make the listing's text and screenshots match the files in listing/."""
+def same(ours, theirs):
+    """Whether Mozilla already holds this value. Lists are compared without regard to order."""
+    if isinstance(ours, dict) and isinstance(theirs, dict):
+        return all(same(value, theirs.get(key)) for key, value in ours.items())
+    if isinstance(ours, list) and isinstance(theirs, list):
+        return sorted(ours) == sorted(theirs)
+    return ours == theirs
+
+
+def sync(fresh_screenshots=False):
+    """Make the listing's text and screenshots match the files in listing/.
+
+    Only what differs is sent, because Mozilla rations changes. Screenshots
+    are matched by position: a picture already in a slot is kept, and only
+    its caption is corrected. To replace the pictures themselves, pass
+    --fresh-screenshots, which removes them all first.
+    """
     text = json.loads((LISTING / "firefox.json").read_text())
     text.pop("version", None)  # licence and notes belong to a version, and go up with it
-    call("PATCH", body=text)
-    print("listing text sent")
+    addon = call("GET", "?show_source=true")
+    changed = {key: value for key, value in text.items() if not same(value, addon.get(key))}
+    if changed:
+        call("PATCH", body=changed)
+        print("listing text sent: %s" % ", ".join(sorted(changed)), flush=True)
+    else:
+        print("listing text is already up to date", flush=True)
 
     wanted = json.loads((LISTING / "screenshots.json").read_text())
-    for old in call("GET").get("previews", []):
-        call("DELETE", "previews/%s/" % old["id"])
+    there = sorted(addon.get("previews", []), key=lambda preview: preview.get("position", 0))
+    if fresh_screenshots:
+        for old in there:
+            call("DELETE", "previews/%s/" % old["id"])
+        there = []
+    for extra in there[len(wanted):]:
+        call("DELETE", "previews/%s/" % extra["id"])
     for position, shot in enumerate(wanted):
-        body, content_type = multipart({"position": position}, "image", LISTING / shot["file"])
-        made = call("POST", "previews/", body, content_type)
-        # The caption cannot go up with the picture, so it follows.
-        call("PATCH", "previews/%s/" % made["id"], {"caption": {"en-US": shot["caption"]}})
-        print("screenshot sent: %s" % shot["file"])
+        if position < len(there):
+            preview = there[position]
+        else:
+            body, content_type = multipart({"position": position}, "image", LISTING / shot["file"])
+            preview = call("POST", "previews/", body, content_type)
+            print("screenshot sent: %s" % shot["file"], flush=True)
+        # A caption cannot go up with its picture, so it follows.
+        caption = {"en-US": shot["caption"]}
+        if not same(caption, preview.get("caption")):
+            call("PATCH", "previews/%s/" % preview["id"], {"caption": caption})
+            print("caption sent: %s" % shot["file"], flush=True)
 
 
 def status():
@@ -130,7 +173,14 @@ def main():
     if command == "has-version" and len(sys.argv) == 3:
         sys.exit(0 if has_version(sys.argv[2]) else 1)
     elif command == "sync":
-        sync()
+        try:
+            sync("--fresh-screenshots" in sys.argv[2:])
+        except ComeBackLater as later:
+            minutes = later.args[0] // 60 + 1
+            raise SystemExit(
+                "Mozilla is not taking more changes to the listing for about %d minutes. "
+                "Nothing is lost: run this again after that and it carries on from here." % minutes
+            )
     elif command == "status":
         status()
     else:

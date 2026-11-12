@@ -5,9 +5,16 @@ name: Firefox catalogue
 # tab: putting something in a public catalogue should be a decision each time.
 #
 # Run it again whenever you like. A version Mozilla already has is not sent
-# twice; the page's text and screenshots are refreshed every time.
+# twice, and only what has changed on the page is sent. Mozilla rations
+# changes to a listing; if a run stops on that, it says how long to wait, and
+# the next run carries on from where it stopped.
 on:
   workflow_dispatch:
+    inputs:
+      fresh_screenshots:
+        description: Replace the screenshots on the page (otherwise only missing ones are added)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,7 +54,8 @@ jobs:
             --source-dir build/listed --artifacts-dir build/signed
 
       - name: Refresh the page's text and screenshots
-        run: python3 tools/amo_listing.py sync
+        run: python3 tools/amo_listing.py sync ${{ inputs.fresh_screenshots && '--fresh-screenshots' || '' }}
 
       - name: Where it stands
+        if: always()
         run: python3 tools/amo_listing.py status
