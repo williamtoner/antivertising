@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -52,17 +53,24 @@ def token():
 def call(method, path="", body=None, content_type="application/json"):
     """One API call. Returns the decoded answer, if there is one."""
     data = json.dumps(body).encode() if content_type == "application/json" and body is not None else body
-    request = urllib.request.Request(API + path, data=data, method=method)
-    request.add_header("Authorization", "JWT " + token())
-    request.add_header("User-Agent", "antivertising-listing")
-    if data is not None:
-        request.add_header("Content-Type", content_type)
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            text = response.read().decode()
-    except urllib.error.HTTPError as error:
-        raise SystemExit("%s %s%s failed: %s\n%s" % (method, API, path, error.code, error.read().decode()[:2000]))
-    return json.loads(text) if text else None
+    for attempt in range(8):
+        request = urllib.request.Request(API + path, data=data, method=method)
+        request.add_header("Authorization", "JWT " + token())
+        request.add_header("User-Agent", "antivertising-listing")
+        if data is not None:
+            request.add_header("Content-Type", content_type)
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                text = response.read().decode()
+            return json.loads(text) if text else None
+        except urllib.error.HTTPError as error:
+            answer = error.read().decode()[:2000]
+            # Mozilla allows only a few changes a minute, and says how long to wait.
+            wait = re.search(r"available in (\d+) second", answer)
+            if error.code != 429 or not wait or attempt == 7:
+                raise SystemExit("%s %s%s failed: %s\n%s" % (method, API, path, error.code, answer))
+            print("Mozilla asks for a pause of %s seconds" % wait.group(1), flush=True)
+            time.sleep(int(wait.group(1)) + 2)
 
 
 def multipart(fields, file_field, file_path):
