@@ -36,7 +36,9 @@ For every ad slot it finds, the extension:
    *Max damage* mode takes the highest score. *Rival* and *Nemesis* modes force one or the other.
 3. **Swaps it in**, at exactly the size and position of the original.
 
-Ads it finds but can't identify get a generic anti-consumption heckle after about five seconds (this can be switched off). If it can at least read where the ad leads, the heckle names the site: "Whatever bonprix.nl is selling, you already own something that does it."
+A recognised ad is swapped within about a tenth of a second of appearing, however late it arrives. Ads turn up in their own time, often seconds after the page and often inside frames the page cannot see into, so nothing is done on a timer: each frame tells the top of the page the moment its contents change, and the slot it belongs to is looked at again there and then.
+
+Ads it finds but can't identify get a generic anti-consumption heckle, about a second after the ad has stopped giving anything new away (this can be switched off). If it can at least read where the ad leads, the heckle names the site: "Whatever bonprix.nl is selling, you already own something that does it."
 
 Slots that only link back to the site you are on are the publisher promoting itself, not paid ads, and are left alone.
 
@@ -57,7 +59,7 @@ It exists so the brand list can be grown from evidence: the entries with `"kind"
 
 ## Adding brands
 
-There are about 1,500 brands across 59 categories, weighted towards the United States and Japan. The 220 in [extension/src/data.js](extension/src/data.js) each have a hand-written pitch and look like this:
+There are about 14,000 brands across 77 categories, from all over the world. The 220 in [extension/src/data.js](extension/src/data.js) each have a hand-written pitch and look like this:
 
 ```js
 b('pepsi', 'Pepsi', '#004b93', ['pepsi.com', 'pepsi.co.uk'],
@@ -67,13 +69,15 @@ b('pepsi', 'Pepsi', '#004b93', ['pepsi.com', 'pepsi.co.uk'],
 
 That is: id, display name, card colour, landing domains, the pitch used when this brand replaces someone else (`{orig}` becomes the victim's name), and options. `strict: true` stops an ambiguous name like "Target" or "Max" from matching in ad text or on other countries' domains; `aliases` adds unambiguous ones.
 
-The rest are one row each in [data-more.js](extension/src/data-more.js) (more brands for existing categories) and [data-new.js](extension/src/data-new.js) (new categories), and share a set of stock pitches:
+The rest are one row each and share a set of stock pitches. [data-more.js](extension/src/data-more.js), [data-new.js](extension/src/data-new.js) and [data-wide.js](extension/src/data-wide.js) hold more brands and more categories; [data-jp.js](extension/src/data-jp.js), [data-us.js](extension/src/data-us.js) and [data-world.js](extension/src/data-world.js) hold the bulk of the list, by region:
 
 ```js
 x('yoshinoya', 'Yoshinoya', '#f39800', 'yoshinoya.com yoshinoyaamerica.com', 'sukiya', '吉野家')
 ```
 
-That is: id, name, colour, domains, arch-rival, aliases, and an optional final `1` for strict. Japanese aliases match as substrings, so avoid short katakana that occurs inside ordinary words.
+That is: id, name, colour, domains, arch-rival, aliases, and an optional final `1` for strict. Japanese aliases match as substrings, so avoid short katakana that occurs inside ordinary words. A name that is an everyday word in any language ("Claro", "Neste", "Worten") needs the `1` too.
+
+The first domain is where the brand's card links to, as `https://that-domain/`. If the site only answers with `www.` in front, add the brand's id to an `R.www('…')` line.
 
 Run the tests after editing. They check the database for duplicate domains and names, missing arch-rivals and brands that could be replaced by themselves.
 
@@ -146,11 +150,12 @@ To see what the extension makes of ads on a real page, open the service worker c
 | File | Job |
 | --- | --- |
 | `src/data.js` | The rivalry database and all the copy. |
-| `src/data-more.js`, `src/data-new.js` | The long list: one row per brand. |
-| `src/engine.js` | `identify()` and `pickCounter()`. Pure functions, no DOM. |
-| `src/content.js` | Top frame only. Finds slots, asks who the advertiser is, swaps. |
-| `src/collector.js` | Every frame. Reports its own links and text when asked. |
-| `src/background.js` | Relays between frames, keeps score and the ad log. |
+| `src/data-more.js`, `src/data-new.js`, `src/data-wide.js` | The long list: more brands for those categories, and more categories. |
+| `src/data-jp.js`, `src/data-us.js`, `src/data-world.js` | The long list by region: one row per brand. |
+| `src/engine.js` | `identify()` and `pickCounter()`. Pure functions, no DOM. Runs in the background worker, with the brand list, so neither is loaded into every page. |
+| `src/content.js` | Top frame only. Finds slots, watches them, asks the background worker what to show, swaps. |
+| `src/collector.js` | Every frame. Says when its contents change, and reports its links and text when asked. |
+| `src/background.js` | Reads ad frames, decides who paid and what replaces it, keeps score and the ad log. |
 | `src/card.js` | Draws the counter-ad in a closed shadow root. |
 
 The awkward part is that real ads live inside cross-origin iframes, often several deep, which the page cannot read, and no API tells a content script which browser frame belongs to which `<iframe>` element. So each frame under the top one makes up a one-off token and posts it to its parent, which can see which element the message came from. To read an ad, the top frame gives that token to the background worker, which asks every frame in the tab whose it is; the owner's answer reveals the frame id, and the worker then asks that frame and every frame nested inside it what the ad links to. Those answers travel over the extension's private message channel, never through the page.
@@ -162,7 +167,7 @@ The handshake runs child-to-parent because ad scripts build their frames with `d
 - **Slot detection is conservative.** It recognises the containers the big networks use (AdSense, Google Ad Manager, Amazon, Taboola, Outbrain and common exchange iframes). It does not guess at `.ad` class names, because a false positive would eat real page content. Sites with home-grown ad markup are missed.
 - **No video ads.** YouTube pre-rolls and the like are untouched.
 - **Identification needs something to read.** A large share of real display ads are a picture whose click goes through an opaque redirect (`doubleclick.net/pcs/click?xai=...`), with no text and no stated destination. Those give no clues and get the generic heckle; only reading the image itself would identify them.
-- **The long tail is long.** The list is about 1,500 names, mostly American and Japanese. Local shops and small campaigns are not in it. Check the exported ad log to see who is being missed.
+- **The long tail is long.** The list is about 14,000 names. Local shops and small campaigns are still not in it. Check the exported ad log to see who is being missed.
 - **The fixed `key` in the manifest** keeps the extension's ID, and therefore its score and log, the same wherever the folder is loaded from. Remove it before submitting to the Chrome Web Store. (The Firefox build drops it and uses a named ID instead.)
 - **Not on phones.** Firefox for Android only installs add-ons listed on Mozilla's site.
 - The original ad still loads before it is replaced, so its advertiser may still be billed for the impression. Arguably a feature.

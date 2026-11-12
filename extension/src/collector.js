@@ -3,8 +3,9 @@
  * itself cannot read, so each frame reports what it can see about its own
  * contents (link targets and visible text) when the background worker asks.
  *
- * Nothing is posted to the page and nothing leaves the browser: replies go
- * over the extension's private message channel only.
+ * Nothing leaves the browser: what a frame saw goes over the extension's
+ * private message channel only. The one thing a frame posts to the page above
+ * it is a note that says nothing: "I exist" or "I changed" (see below).
  */
 (function () {
   'use strict';
@@ -121,6 +122,8 @@
    *   1. Each frame directly under the top frame makes up a random token and
    *      posts it to its parent. The top frame sees which window the message
    *      came from, so it can pair the token with the <iframe> element.
+   *      A frame that has announced itself is one whose document has begun
+   *      to load, which content.js uses to tell an empty slot from a slow one.
    *   2. When the top frame wants to know about an iframe, it gives that
    *      token to the background worker, which asks every frame in the tab
    *      "whose is this?". The owner answers, and the answer's sender is the
@@ -133,6 +136,7 @@
    */
   var HELLO = 'antivertising:';
   var TOKEN = /^[0-9a-f]{32}$/;
+  var CHANGED = 'changed';
   var MAX_CHILDREN = 400;
   var myToken = null;
 
@@ -146,6 +150,13 @@
     window.addEventListener('message', function (e) {
       if (typeof e.data !== 'string' || e.data.slice(0, HELLO.length) !== HELLO) return;
       var token = e.data.slice(HELLO.length);
+      if (token === CHANGED) {
+        // A frame somewhere below has new contents. content.js, which loads
+        // later, decides what to do about it.
+        e.stopImmediatePropagation();
+        if (e.source && e.source !== window && globalThis.AVFrameChanged) globalThis.AVFrameChanged(e.source);
+        return;
+      }
       if (!TOKEN.test(token)) return;
       e.stopImmediatePropagation(); // ours; the page's own scripts need not see it
       if (!e.source || e.source === window) return;
@@ -170,6 +181,34 @@
       myToken = newToken();
       try { window.parent.postMessage(HELLO + myToken, '*'); } catch (err) { /* parent went away */ }
     }
+
+    /*
+     * Ads arrive in their own time: a frame may sit empty for seconds, or be
+     * filled in by a script long after it loaded. So that the top frame can
+     * swap an ad the moment it appears, instead of checking on a timer, every
+     * frame tells it "I changed" when its document loads or gains nodes or
+     * links. The note carries nothing but that. It is sent sparingly: the
+     * first after 60 ms, each later one after twice the wait, up to 2 s.
+     *
+     * The observer is on the document itself because ad scripts rebuild
+     * frames with document.open(), which keeps the document object and its
+     * observers but drops every event listener.
+     */
+    var noteGap = 60;
+    var noteTimer = null;
+    var changed = function () {
+      if (noteTimer !== null) return;
+      noteTimer = setTimeout(function () {
+        noteTimer = null;
+        noteGap = Math.min(noteGap * 2, 2000);
+        try { window.top.postMessage(HELLO + CHANGED, '*'); } catch (err) { /* top went away */ }
+      }, noteGap);
+    };
+    document.addEventListener('DOMContentLoaded', changed);
+    window.addEventListener('load', changed);
+    try {
+      new MutationObserver(changed).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['href', 'src'] });
+    } catch (err) { /* no document to watch */ }
   }
 
   chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {

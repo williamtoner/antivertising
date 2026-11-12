@@ -114,6 +114,12 @@ test('lookalike domains do not match', function () {
   assert.strictEqual(id({ urls: ['https://aax.amazon-adsystem.com/x/c/abc'], text: '' }), null);
 });
 
+test('sites named after JavaScript built-ins are not brands', function () {
+  ['constructor', 'tostring', 'valueof', 'hasownproperty', '__proto__'].forEach(function (word) {
+    assert.strictEqual(id({ urls: ['https://' + word.replace(/_/g, '') + '.io/'], text: word + ' toString constructor' }), null);
+  });
+});
+
 test('identifies a brand from ad text', function () {
   assert.strictEqual(id({ urls: [], text: 'Nothing beats a Big Mac®. Order now.' }), 'mcdonalds');
   assert.strictEqual(id({ urls: [], text: 'Switch to T-Mobile today' }), 't-mobile');
@@ -162,7 +168,7 @@ test('max damage sends Pepsi to Coke and Coke to Pepsi', function () {
   assert.strictEqual(c.kind, 'rival');
   assert.strictEqual(c.id, 'coca-cola');
   assert.strictEqual(c.original, 'Pepsi');
-  assert.strictEqual(c.url, 'https://www.coca-cola.com/');
+  assert.strictEqual(c.url, 'https://coca-cola.com/');
   assert.ok(c.line.indexOf('Pepsi') !== -1 && c.line.indexOf('{orig}') === -1, c.line);
   assert.strictEqual(counter({ urls: ['https://coke.com/'], text: '' }).id, 'pepsi');
 });
@@ -274,6 +280,17 @@ test('slots that only link to the page itself are house promos, not ads', functi
   assert.strictEqual(served.house, true);
   // and no links at all tells us nothing either way
   assert.strictEqual(AV.identify({ links: [], urls: [], text: '', pageHost: 'x.example' }).house, false);
+});
+
+test('a brand promoting itself on its own site is a house promo', function () {
+  // On nike.com, a box about Nike is not an ad Nike paid someone for.
+  var own = AV.identify({ urls: ['https://www.nike.com/run'], links: ['https://ads.example.net/c?u=https%3A%2F%2Fwww.nike.com%2Frun'], text: 'Nike. Run further.', pageHost: 'www.nike.com' });
+  assert.strictEqual(own.brand, null);
+  assert.strictEqual(own.house, true);
+  // The same box on somebody else's site is an ad.
+  assert.strictEqual(id({ urls: ['https://www.nike.com/run'], links: ['https://www.nike.com/run'], text: 'Nike. Run further.', pageHost: 'news.example.org' }), 'nike');
+  // And a rival's ad on nike.com is still an ad.
+  assert.strictEqual(id({ urls: ['https://www.adidas.com/'], links: ['https://www.adidas.com/'], text: 'adidas', pageHost: 'www.nike.com' }), 'adidas');
 });
 
 test('the heckle names the advertiser when it can', function () {

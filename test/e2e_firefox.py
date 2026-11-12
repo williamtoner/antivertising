@@ -9,13 +9,10 @@ into the right counter-ad. The Firefox twin of test/e2e.py.
 Set AV_FIREFOX and AV_GECKODRIVER to use specific binaries.
 """
 import argparse
-import functools
-import http.server
 import json
 import os
 import sys
 import tempfile
-import threading
 import time
 import uuid
 from pathlib import Path
@@ -29,6 +26,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEMO = ROOT / "demo"
 sys.path.insert(0, str(ROOT / "tools"))
 import build_firefox  # noqa: E402
+import slowads  # noqa: E402
 
 # data-av-original -> data-av-counter, one per ad slot on the demo page
 EXPECTED = {
@@ -48,18 +46,6 @@ SWAPS = """return Array.from(document.querySelectorAll('[data-antivertising]')).
     counter: h.getAttribute('data-av-counter'),
     width: h.offsetWidth, height: h.offsetHeight,
 }))"""
-
-
-class Quiet(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
-
-def serve():
-    handler = functools.partial(Quiet, directory=str(DEMO))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
 
 
 def wait_for(driver, script, timeout=20.0):
@@ -92,7 +78,7 @@ def main():
     parser.add_argument("--shots", help="directory to save screenshots in")
     args = parser.parse_args()
 
-    server = serve()
+    server = slowads.serve(DEMO)
     url = "http://localhost:%d/index.html" % server.server_address[1]
     failures = []
 
@@ -125,8 +111,8 @@ def main():
             driver.install_addon(str(xpi), temporary=True)  # unsigned, so temporary
             driver.get(url)
 
-            # Recognised advertisers are swapped within a second or two; the
-            # generic heckle deliberately waits about five.
+            # Recognised advertisers are swapped at once; the generic heckle
+            # waits until the ad has stopped telling us things.
             wait_for(driver, "return document.querySelectorAll('[data-antivertising]').length >= %d" % len(EXPECTED))
             time.sleep(0.6)
             got = {s["original"]: s for s in driver.execute_script(SWAPS)}
@@ -241,6 +227,15 @@ def main():
                 driver.close()
                 driver.switch_to.window(popup_tab)
 
+            # Ads that arrive late are swapped as they arrive, not on a timer.
+            popup_tab = driver.current_window_handle
+            driver.switch_to.new_window("tab")
+            driver.get(slowads.url(server))
+            wait_for(driver, "return " + slowads.DONE, slowads.PATIENCE / 1000.0)
+            failures.extend(slowads.judge(driver.execute_script("return T")))
+            driver.close()
+            driver.switch_to.window(popup_tab)
+
             # Switching off restores every ad on the open page, live.
             driver.find_element("css selector", "label.switch").click()
             driver.switch_to.window(page_tab)
@@ -255,7 +250,7 @@ def main():
         for f in failures:
             print("  -", f)
         return 1
-    print("ok (Firefox): %d ads swapped as expected, undo, off-switch, ad log and share page work" % len(EXPECTED))
+    print("ok (Firefox): %d ads swapped as expected, %d late ads swapped as they arrived, undo, off-switch, ad log and share page work" % (len(EXPECTED), len(slowads.SLOTS)))
     return 0
 
 

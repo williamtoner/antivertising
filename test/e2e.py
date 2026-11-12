@@ -8,15 +8,15 @@ page, and assert every fake ad turned into the right counter-ad.
 Set AV_CHROMIUM to use a specific Chromium binary.
 """
 import argparse
-import functools
-import http.server
 import os
 import sys
 import tempfile
-import threading
 from pathlib import Path
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import sync_playwright
+
+import slowads
 
 ROOT = Path(__file__).resolve().parent.parent
 EXT = ROOT / "extension"
@@ -36,18 +36,6 @@ EXPECTED = {
 }
 
 
-class Quiet(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
-
-
-def serve():
-    handler = functools.partial(Quiet, directory=str(DEMO))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
-
-
 def swaps(page):
     return page.evaluate(
         """() => Array.from(document.querySelectorAll('[data-antivertising]')).map(h => ({
@@ -63,7 +51,7 @@ def main():
     parser.add_argument("--shots", help="directory to save screenshots in")
     args = parser.parse_args()
 
-    server = serve()
+    server = slowads.serve(DEMO)
     url = "http://localhost:%d/index.html" % server.server_address[1]
     failures = []
 
@@ -87,8 +75,8 @@ def main():
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.goto(url)
 
-        # Recognised advertisers are swapped within a second or two; the
-        # generic heckle deliberately waits about five.
+        # Recognised advertisers are swapped at once; the generic heckle
+        # waits until the ad has stopped telling us things.
         page.wait_for_function(
             "n => document.querySelectorAll('[data-antivertising]').length >= n", arg=len(EXPECTED), timeout=20000
         )
@@ -172,6 +160,16 @@ def main():
         if not download.value.suggested_filename.startswith("antivertising-log-"):
             failures.append("export saved as %r" % download.value.suggested_filename)
 
+        # Ads that arrive late are swapped as they arrive, not on a timer.
+        slow = ctx.new_page()
+        slow.goto(slowads.url(server))
+        try:
+            slow.wait_for_function(slowads.DONE, timeout=slowads.PATIENCE)
+        except PlaywrightTimeout:
+            pass  # judge() says which ones are missing
+        failures.extend(slowads.judge(slow.evaluate("T")))
+        slow.close()
+
         # Switching off restores every ad on the open page, live.
         popup.click("label.switch")
         page.bring_to_front()
@@ -187,7 +185,7 @@ def main():
         for f in failures:
             print("  -", f)
         return 1
-    print("ok: %d ads swapped as expected, undo, off-switch and ad log work" % len(EXPECTED))
+    print("ok: %d ads swapped as expected, %d late ads swapped as they arrived, undo, off-switch and ad log work" % (len(EXPECTED), len(slowads.SLOTS)))
     return 0
 
 

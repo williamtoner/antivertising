@@ -1,6 +1,6 @@
 /*
- * Top-frame content script: finds ad slots, works out who paid for each one,
- * and swaps in the counter-ad.
+ * Top-frame content script: finds ad slots, asks the background worker who
+ * paid for each one and what should replace it, and swaps that in.
  */
 (function () {
   'use strict';
@@ -31,15 +31,36 @@
 
   var DEFAULTS = { enabled: true, mode: 'auto', fallback: true, pausedHosts: [], debug: false, logging: true };
 
-  // Ads fill in asynchronously, so each slot gets several looks (ms after it
-  // is first seen). A recognised advertiser is swapped at once; the generic
-  // heckle waits until FALLBACK_FROM so slow creatives get a fair chance.
-  var ATTEMPTS = [400, 1200, 2500, 5000, 9000];
-  var FALLBACK_FROM = 3;
+  /*
+   * Ads fill in whenever they like, so a slot is watched, not polled: it is
+   * looked at again the moment something inside it changes. Changes in the
+   * page reach us through a MutationObserver; changes inside ad frames, which
+   * the page cannot see, reach us as a ping from the frame (collector.js).
+   * A recognised advertiser is swapped on the spot.
+   *
+   * A look gathers what the page can see of the slot and hands it to the
+   * background worker, which reads the slot's frames, works out who paid and
+   * picks the replacement. The brand list lives there, once, and not in
+   * every page.
+   */
+  var LOOK_GAP = 120;                           // least time between two looks at one slot, ms
+  var SAFETY = [0, 300, 1000, 2500, 5000, 9000]; // looks made even if nothing prompts one, ms after the slot is found
+  var MAX_LOOKS = 80;                           // then the slot is left alone
+
+  // The generic heckle is for advertisers we do not know, so it must not fire
+  // while the ad is still arriving. Once the ad has shown us links or text it
+  // goes up as soon as nothing new has turned up for QUIET. An ad that gives
+  // nothing away gets longer, and one whose frame has not even loaded, longer still.
+  var SETTLE_MIN = 1200;
+  var QUIET = 800;
+  var SETTLE_BARE = 6000;
+  var SETTLE_UNLOADED = 15000;
 
   var settings = DEFAULTS;
   var tracked = new WeakSet();
   var promoted = new WeakSet(); // frames handled on their own, see splitSlot()
+  var released = new WeakSet(); // slots whose real ad the reader asked to see again
+  var pending = [];             // slots being watched: see track()
   var swaps = [];
   var swapCount = 0;
   var scanTimer = null;
@@ -72,7 +93,7 @@
   }
 
   function scheduleScan() {
-    if (scanTimer === null) scanTimer = setTimeout(scan, 400);
+    if (scanTimer === null) scanTimer = setTimeout(scan, 100);
   }
 
   function hasCreative(slot) {
@@ -85,41 +106,155 @@
 
   function track(slot) {
     tracked.add(slot);
-    var i = 0;
+    if (pending.length >= 300) finish(pending[0]);
+    var rec = {
+      slot: slot, born: Date.now(), done: false, timer: null, due: 0, busy: false, again: false,
+      looks: 0, lookedAt: 0, safety: 0,
+      creativeAt: 0, // when the slot first held something to replace
+      newsAt: 0,     // when a look last learnt something new
+      print: '',     // what the last look learnt, in brief
+      heckleAt: 0    // when the generic heckle falls due, if it does
+    };
+    pending.push(rec);
+    wake(rec, 0);
+  }
 
-    function attempt() {
-      if (!isActive() || !slot.isConnected || slot.hasAttribute('data-antivertised')) return;
-      // Ad scripts tag containers as they go, so a slot that looked outermost
-      // a second ago may now sit inside a bigger one. Leave it to the outer
-      // slot, and never swap around a card that is already showing.
-      if (!promoted.has(slot) && slot.parentElement && slot.parentElement.closest(SLOT_SELECTOR)) { scheduleScan(); return; }
-      if (slot.querySelector('[data-antivertising]')) return;
-      if (splitSlot(slot)) return;
+  function finish(rec) {
+    rec.done = true;
+    if (rec.timer !== null) { clearTimeout(rec.timer); rec.timer = null; }
+    var at = pending.indexOf(rec);
+    if (at !== -1) pending.splice(at, 1);
+  }
 
-      var rect = slot.getBoundingClientRect();
-      var usable = rect.width >= 60 && rect.height >= 30;
-      var looked = usable ? gather(slot) : Promise.resolve(null);
+  // Look at this slot in `delay` ms, or sooner if a look is already due.
+  // A slot that keeps changing is looked at less and less often.
+  function wake(rec, delay) {
+    if (rec.done) return;
+    var gap = Math.min(LOOK_GAP << Math.floor(rec.looks / 8), 5000);
+    var at = Math.max(Date.now() + (delay || 0), rec.lookedAt + gap);
+    if (rec.timer !== null) {
+      if (rec.due <= at) return;
+      clearTimeout(rec.timer);
+    }
+    rec.due = at;
+    rec.timer = setTimeout(function () { rec.timer = null; look(rec); }, Math.max(0, at - Date.now()));
+  }
 
-      looked.then(function (signals) {
-        if (signals && isActive() && slot.isConnected) {
-          var match = AV.identify(signals);
-          if (settings.debug) report(slot, rect, i, signals, match);
-          var creative = null;
-          if (match.category) {
-            creative = AV.pickCounter(match, { mode: settings.mode });
-          } else if (i >= FALLBACK_FROM && settings.fallback && hasCreative(slot) && !match.house) {
-            // match.house: the slot only links back to this very site, so it
-            // is the publisher promoting itself, not a paid ad. Leave it.
-            creative = AV.pickCounter(match, { mode: settings.mode, fallback: true });
-          }
-          if (creative && swap(slot, creative, logEntry(signals, match))) return;
-        }
-        i++;
-        if (i < ATTEMPTS.length) setTimeout(attempt, ATTEMPTS[i] - ATTEMPTS[i - 1]);
-      });
+  // Nothing more to do for now: line up the next look, if one is owed.
+  function rest(rec) {
+    if (rec.again) { rec.again = false; wake(rec, 0); return; }
+    if (rec.looks >= MAX_LOOKS) { finish(rec); return; }
+    var now = Date.now();
+    var next = Infinity;
+    while (rec.safety < SAFETY.length && rec.born + SAFETY[rec.safety] <= now) rec.safety++;
+    if (rec.safety < SAFETY.length) next = rec.born + SAFETY[rec.safety];
+    if (rec.heckleAt) next = Math.min(next, rec.heckleAt);
+    if (next !== Infinity) wake(rec, next - now);
+    // Otherwise the slot waits for a change inside it to wake it.
+  }
+
+  function isRich(signals) {
+    return signals.links.length > 0 || signals.text.trim().length >= 20;
+  }
+
+  function look(rec) {
+    var slot = rec.slot;
+    if (rec.done) return;
+    if (!isActive() || !slot.isConnected || slot.hasAttribute('data-antivertised') || released.has(slot)) { finish(rec); return; }
+    if (rec.busy) { rec.again = true; return; }
+    // Ad scripts tag containers as they go, so a slot that looked outermost
+    // a moment ago may now sit inside a bigger one. Leave it to the outer
+    // slot, and never swap around a card that is already showing.
+    if (!promoted.has(slot) && slot.parentElement && slot.parentElement.closest(SLOT_SELECTOR)) { finish(rec); scheduleScan(); return; }
+    if (slot.querySelector('[data-antivertising]')) { finish(rec); return; }
+    if (splitSlot(slot)) { finish(rec); return; }
+
+    var rect = slot.getBoundingClientRect();
+    rec.lookedAt = Date.now();
+    rec.looks++;
+    if (!bigEnough(rect)) { rest(rec); return; }
+    if (!rec.creativeAt && hasCreative(slot)) rec.creativeAt = rec.lookedAt;
+
+    // What the page itself can see of the slot, and which frames to ask about the rest.
+    var local = globalThis.AVCollect(slot);
+    var frames = slot.matches('iframe') ? [slot] : Array.prototype.slice.call(slot.querySelectorAll('iframe'));
+    var tokens = [];
+    var unloaded = false; // a frame in the slot has not begun to load
+    frames.forEach(function (frame) {
+      var token = frame.contentWindow && globalThis.AVFrameToken(frame.contentWindow);
+      if (token) tokens.push(token);
+      else if (bigEnough(frame.getBoundingClientRect())) unloaded = true;
+    });
+
+    var bareWait = unloaded ? SETTLE_UNLOADED : SETTLE_BARE;
+    var mayHeckle = settings.fallback && rec.creativeAt;
+    if (!tokens.length && !local.urls.length && !local.text.trim() && !(mayHeckle && rec.lookedAt >= rec.creativeAt + bareWait)) {
+      // Nothing to go on yet, and nothing to ask anyone.
+      rec.heckleAt = mayHeckle ? rec.creativeAt + bareWait : 0;
+      rest(rec);
+      return;
     }
 
-    setTimeout(attempt, ATTEMPTS[0]);
+    rec.busy = true;
+    send({
+      type: 'av-look',
+      tokens: tokens,
+      local: { urls: local.urls, links: local.links, text: local.text },
+      mode: settings.mode,
+      logging: settings.logging,
+      debug: settings.debug
+    }).then(function (answer) {
+      rec.busy = false;
+      if (rec.done) return;
+      if (!isActive() || !slot.isConnected) { finish(rec); return; }
+      if (!answer) { rest(rec); return; } // the extension was reloaded, or is busy starting
+      var now = Date.now();
+      if (answer.print !== rec.print) { rec.print = answer.print; rec.newsAt = now; }
+      if (answer.debug) report(slot, rect, rec.looks, frames.length, answer);
+
+      var creative = answer.creative;
+      rec.heckleAt = 0;
+      if (!creative && mayHeckle && answer.heckle) {
+        // For a slot built from frames only what the frames say counts: the
+        // page's own "Advertisement" label around them says nothing about the ad.
+        var rich = frames.length ? answer.rich : isRich(local);
+        rec.heckleAt = unloaded ? rec.creativeAt + SETTLE_UNLOADED
+          : rich ? Math.max(rec.creativeAt + SETTLE_MIN, rec.newsAt + QUIET)
+          : rec.creativeAt + SETTLE_BARE;
+        if (now >= rec.heckleAt) creative = answer.heckle;
+      }
+      if (creative && swap(slot, creative, answer.log)) { finish(rec); return; }
+      rest(rec);
+    });
+  }
+
+  // A frame somewhere under this page says its contents changed (see
+  // collector.js). Look again at the slot it belongs to.
+  globalThis.AVFrameChanged = function (win) {
+    if (!pending.length) return;
+    var child = win;
+    try {
+      // Up to the frame that sits directly in this page.
+      for (var hops = 0; hops < 12 && child && child.parent !== window && child.parent !== child; hops++) child = child.parent;
+    } catch (e) { return; }
+    pending.slice().forEach(function (rec) {
+      var frames = rec.slot.matches('iframe') ? [rec.slot] : rec.slot.querySelectorAll('iframe');
+      for (var i = 0; i < frames.length; i++) {
+        if (frames[i].contentWindow === child) { wake(rec, 0); return; }
+      }
+    });
+  };
+
+  // Something in the page changed: look again at any watched slot it was in.
+  function onMutations(records) {
+    scheduleScan();
+    if (!pending.length) return;
+    for (var i = 0; i < records.length && i < 200; i++) {
+      var node = records[i].target;
+      for (var j = 0; j < pending.length; j++) {
+        if (pending[j].slot === node || pending[j].slot.contains(node)) wake(pending[j], 0);
+      }
+    }
   }
 
   function bigEnough(rect) {
@@ -184,90 +319,15 @@
 
   // Switch on with chrome.storage.local.set({ debug: true }) from the service
   // worker console; every look at every slot is then logged to the page console.
-  function report(slot, rect, attempt, signals, match) {
-    var hosts = {};
-    signals.urls.forEach(function (u) { AV.hostsFromUrl(u).forEach(function (h) { hosts[h] = true; }); });
-    console.log('[antivertising] ' + JSON.stringify({
+  function report(slot, rect, look, frames, answer) {
+    var line = {
       slot: slot.tagName.toLowerCase() + (slot.id ? '#' + slot.id : '') + (slot.className && typeof slot.className === 'string' ? '.' + slot.className.split(/\s+/)[0] : ''),
       size: Math.round(rect.width) + 'x' + Math.round(rect.height),
-      attempt: attempt,
-      frames: slot.matches('iframe') ? 1 : slot.querySelectorAll('iframe').length,
-      urls: signals.urls.length,
-      hosts: Object.keys(hosts).slice(0, 25),
-      links: signals.links.slice(0, 8).map(function (u) { return u.slice(0, 200); }),
-      text: signals.text.slice(0, 160),
-      match: match.brand ? match.brand.id : match.category ? 'category:' + match.category.id : null,
-      via: match.via,
-      domain: match.domain,
-      house: match.house
-    }));
-  }
-
-  /*
-   * One row of the ad log: what this ad gave away about itself and what it
-   * matched. Kept in the browser (see background.js) and only ever leaves it
-   * when the user presses Export in the popup. The page is recorded as a
-   * hostname, never a full address.
-   */
-  var LOG_HOSTS = 12;
-  var LOG_TEXT = 400;
-
-  function logEntry(signals, match) {
-    if (!settings.logging) return null;
-    var own = AV.siteOf(location.hostname);
-    var seen = {};
-    var hosts = [];
-    signals.urls.forEach(function (u) {
-      AV.hostsFromUrl(u).forEach(function (h) {
-        var site = AV.siteOf(h);
-        if (seen[site] || site === own || AV.isInfra(h) || hosts.length >= LOG_HOSTS) return;
-        seen[site] = true;
-        hosts.push(site);
-      });
-    });
-    return {
-      page: location.hostname,
-      landing: match.domain || null,
-      brand: match.brand ? match.brand.id : null,
-      category: match.category ? match.category.id : null,
-      via: match.via || null,
-      hosts: hosts,
-      text: signals.text.replace(/\s+/g, ' ').trim().slice(0, LOG_TEXT)
+      attempt: look,
+      frames: frames
     };
-  }
-
-  // ---- working out who the advertiser is --------------------------------------
-
-  /*
-   * A page cannot read a cross-origin iframe, and a content script cannot ask
-   * the browser "which frame is this element?". Each frame has announced a one-off
-   * token to us (see the handshake in collector.js); we pass the tokens of
-   * the slot's iframes to the background worker, which finds the frames that
-   * own them and asks those, and every frame nested inside them, for their
-   * links and text.
-   */
-  function gather(slot) {
-    var local = globalThis.AVCollect(slot);
-    local.pageHost = location.hostname;
-    var frames = slot.matches('iframe') ? [slot] : Array.prototype.slice.call(slot.querySelectorAll('iframe'));
-    var tokens = [];
-    frames.forEach(function (frame) {
-      var token = frame.contentWindow && globalThis.AVFrameToken(frame.contentWindow);
-      if (token) tokens.push(token);
-    });
-    if (!tokens.length) return Promise.resolve(local); // frames not loaded yet; we look again later
-
-    var reply = send({ type: 'av-collect-frames', nonces: tokens });
-
-    return reply.then(function (remote) {
-      if (!remote) return local;
-      return {
-        urls: local.urls.concat(remote.urls || []),
-        links: local.links.concat(remote.links || []),
-        text: local.text + ' ' + (remote.text || ''),
-        pageHost: local.pageHost
-      };
-    });
+    for (var k in answer.debug) line[k] = answer.debug[k];
+    console.log('[antivertising] ' + JSON.stringify(line));
   }
 
   // ---- swapping -----------------------------------------------------------------
@@ -333,6 +393,7 @@
     var at = swaps.indexOf(entry);
     if (at === -1) return;
     swaps.splice(at, 1);
+    released.add(entry.slot);
     entry.host.remove();
     entry.slot.removeAttribute('data-antivertised');
     if (entry.display) entry.target.style.setProperty('display', entry.display, entry.priority);
@@ -347,8 +408,10 @@
     if (isActive() && !wasActive) {
       tracked = new WeakSet();
       promoted = new WeakSet();
+      released = new WeakSet();
       scan();
     } else if (!isActive() && wasActive) {
+      pending.slice().forEach(finish);
       swaps.slice().forEach(undo);
     }
   }
@@ -362,7 +425,7 @@
   chrome.storage.local.get(DEFAULTS, function (stored) {
     settings = merged(stored);
     scan();
-    new MutationObserver(scheduleScan).observe(document.documentElement, {
+    new MutationObserver(onMutations).observe(document.documentElement, {
       childList: true,
       subtree: true,
       attributes: true,

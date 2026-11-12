@@ -198,7 +198,7 @@
     <div class="wrap">
       <p class="eyebrow">Try it</p>
       <h2>Name a brand. See who gets its ad.</h2>
-      <p>The same matching runs here as in the extension. It knows about 1,500 brands, in English and Japanese.</p>
+      <p>The same matching runs here as in the extension. It knows about 14,000 brands from around the world, by their names in English, Japanese and their own languages.</p>
       <div class="try">
         <div class="ask">
           <label class="sr" for="brand">A brand name</label>
@@ -337,6 +337,7 @@
 <script src="av/data.js"></script>
 <script src="av/data-more.js"></script>
 <script src="av/data-new.js"></script>
+<script src="av/data-wide.js"></script>
 <script src="av/engine.js"></script>
 <script src="av/card.js"></script>
 <script>
@@ -344,11 +345,15 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
 
+  // The brands the page starts with. The long list by region is over a
+  // megabyte, so it arrives after the page is up (see the end of this script).
+  var index = AV.buildIndex(AV_DATA);
+
   function lookUp(text, mode) {
     text = text.trim();
     var isAddress = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(text);
-    var match = AV.identify({ urls: [], links: isAddress ? ['https://' + text + '/'] : [], text: text });
-    return { match: match, creative: AV.pickCounter(match, { mode: mode }) };
+    var match = AV.identify({ urls: [], links: isAddress ? ['https://' + text + '/'] : [], text: text }, index);
+    return { match: match, creative: AV.pickCounter(match, { mode: mode }, index) };
   }
 
   // Draw a card to fill a stage. Cards are sized in pixels, so they are redrawn if the stage changes size.
@@ -445,6 +450,20 @@
     chip.addEventListener('click', function () { input.value = chip.textContent; answer(); });
   });
   answer();
+
+  // Fetch the rest of the brand list, one file after another, then start
+  // using it, and answer again in case somebody has already typed a name.
+  (function fetchMore(files) {
+    if (!files.length) {
+      index = AV.buildIndex(AV_DATA);
+      answer();
+      return;
+    }
+    var script = document.createElement('script');
+    script.src = 'av/' + files[0];
+    script.onload = function () { fetchMore(files.slice(1)); };
+    document.body.appendChild(script);
+  })(['data-jp.js', 'data-us.js', 'data-world.js']);
 
   // ---- install: show the steps for the browser being used ----
   function pickBrowser(name) {

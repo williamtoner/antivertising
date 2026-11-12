@@ -1,9 +1,12 @@
 /*
  * Background worker (a service worker in Chrome, an event page in Firefox).
- * Two jobs:
- *   1. Relay: a page cannot see inside cross-origin ad iframes, so when the
+ * Three jobs:
+ *   1. Reading: a page cannot see inside cross-origin ad iframes, so when the
  *      top frame asks about a slot we query every frame nested under it.
- *   2. Scorekeeping: count swaps for the popup and the toolbar badge, and
+ *   2. Deciding: who paid for the ad, and what should replace it. The brand
+ *      list is thousands of rows; it is loaded here, once for the whole
+ *      browser, and not into every page.
+ *   3. Scorekeeping: count swaps for the popup and the toolbar badge, and
  *      keep the ad log (what each ad was and what replaced it).
  *
  * The only state held in memory is the half-second frame handshake below
@@ -11,6 +14,16 @@
  * chrome.storage.local. Nothing is sent over the network.
  */
 'use strict';
+
+// The brand list and the engine. Chrome loads them here; Firefox, whose
+// background page cannot, is given the same list by tools/build_firefox.py.
+if (typeof importScripts === 'function') {
+  importScripts(
+    'data.js', 'data-more.js', 'data-new.js', 'data-wide.js', 'data-jp.js', 'data-us.js', 'data-world.js',
+    'engine.js'
+  );
+}
+var AV = globalThis.AV;
 
 var MAX_FRAMES = 25;
 var MAX_URLS = 120;
@@ -57,6 +70,101 @@ function collectFrames(tabId, rootIds) {
     });
     return { urls: urls.slice(0, MAX_URLS), links: links.slice(0, MAX_URLS), text: text.slice(0, MAX_TEXT) };
   });
+}
+
+// ---- who paid, and what replaces it ------------------------------------------
+
+var LOG_HOSTS = 12;
+var LOG_TEXT = 400;
+
+function strings(list, max, length) {
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, max).filter(function (v) { return typeof v === 'string'; }).map(function (v) { return v.slice(0, length); });
+}
+
+function isRich(signals) {
+  return signals.links.length > 0 || signals.text.trim().length >= 20;
+}
+
+/*
+ * One row of the ad log: what this ad gave away about itself and what it
+ * matched. It stays in the browser and only ever leaves it when the user
+ * presses Export in the popup. The page is recorded as a hostname, never a
+ * full address. The page script adds the size and the replacement when it
+ * makes the swap.
+ */
+function logEntry(signals, match) {
+  var own = AV.siteOf(signals.pageHost);
+  var seen = {};
+  var hosts = [];
+  signals.urls.forEach(function (u) {
+    AV.hostsFromUrl(u).forEach(function (h) {
+      var site = AV.siteOf(h);
+      if (seen[site] || site === own || AV.isInfra(h) || hosts.length >= LOG_HOSTS) return;
+      seen[site] = true;
+      hosts.push(site);
+    });
+  });
+  return {
+    page: signals.pageHost,
+    landing: match.domain || null,
+    brand: match.brand ? match.brand.id : null,
+    category: match.category ? match.category.id : null,
+    via: match.via || null,
+    hosts: hosts,
+    text: signals.text.replace(/\s+/g, ' ').trim().slice(0, LOG_TEXT)
+  };
+}
+
+/*
+ * msg.local: what the page could see of the slot. remote: what the slot's
+ * frames said, or null if it has none that answered. Returns
+ *   creative  the counter-ad, when we know the advertiser or at least the category
+ *   heckle    the generic card, when we do not; the page shows it once the
+ *             ad has had time to say more
+ *   print     a fingerprint of what was learnt, so the page can tell news from no news
+ *   rich      whether the frames have shown links or text yet
+ *   log       the ad-log row, if logging is on
+ */
+function decide(msg, remote, pageHost) {
+  var local = msg.local && typeof msg.local === 'object' ? msg.local : {};
+  var signals = {
+    urls: strings(local.urls, 60, 2000).concat(remote ? remote.urls : []),
+    links: strings(local.links, 60, 2000).concat(remote ? remote.links : []),
+    text: (typeof local.text === 'string' ? local.text.slice(0, 3000) : '') + ' ' + (remote ? remote.text : ''),
+    pageHost: pageHost
+  };
+  var mode = msg.mode === 'rival' || msg.mode === 'nemesis' ? msg.mode : 'auto';
+  var match = AV.identify(signals);
+  var out = {
+    print: signals.urls.length + '/' + signals.links.length + '/' + signals.text.length,
+    rich: !!remote && isRich(remote),
+    creative: null,
+    heckle: null,
+    log: msg.logging ? logEntry(signals, match) : null
+  };
+  if (match.category) {
+    out.creative = AV.pickCounter(match, { mode: mode });
+  } else if (!match.house) {
+    // match.house: the slot only links back to this very site, so it is the
+    // publisher promoting itself, not a paid ad. It is left alone.
+    out.heckle = AV.pickCounter(match, { mode: mode, fallback: true });
+  }
+  if (msg.debug) {
+    var hosts = {};
+    signals.urls.forEach(function (u) { AV.hostsFromUrl(u).forEach(function (h) { hosts[h] = true; }); });
+    out.debug = {
+      urls: signals.urls.length,
+      hosts: Object.keys(hosts).slice(0, 25),
+      links: signals.links.slice(0, 8).map(function (u) { return u.slice(0, 200); }),
+      text: signals.text.slice(0, 160),
+      match: match.brand ? match.brand.id : match.category ? 'category:' + match.category.id : null,
+      via: match.via,
+      domain: match.domain,
+      house: match.house
+    };
+  }
+  return out;
 }
 
 // The ad log is stored in chunks ("log:0", "log:1", ...) so that adding a row
@@ -179,18 +287,26 @@ chrome.runtime.onMessage.addListener(function (msg, sender, sendResponse) {
     return;
   }
 
-  if (msg.type === 'av-collect-frames' && Array.isArray(msg.nonces)) {
+  if (msg.type === 'av-look') {
     var tabId = sender.tab.id;
-    var nonces = msg.nonces.slice(0, MAX_FRAMES).map(String);
-    var unknown = nonces.filter(function (n) { return !arrived.has(n); });
-    var lookups = nonces.map(function (n) { return frameIdFor(tabId, n); });
-    if (unknown.length) {
-      // No frameId: this goes to every frame in the tab. Only owners react.
-      chrome.tabs.sendMessage(tabId, { type: 'av-who', tokens: unknown }).catch(function () {});
+    var pageHost = '';
+    try { pageHost = new URL(sender.url || sender.tab.url).hostname; } catch (e) { /* no address to go on */ }
+    var nonces = Array.isArray(msg.tokens) ? msg.tokens.slice(0, MAX_FRAMES).map(String) : [];
+    var read = Promise.resolve(null);
+    if (nonces.length) {
+      var unknown = nonces.filter(function (n) { return !arrived.has(n); });
+      var lookups = nonces.map(function (n) { return frameIdFor(tabId, n); });
+      if (unknown.length) {
+        // No frameId: this goes to every frame in the tab. Only owners react.
+        chrome.tabs.sendMessage(tabId, { type: 'av-who', tokens: unknown }).catch(function () {});
+      }
+      read = Promise.all(lookups)
+        .then(function (frameIds) { return collectFrames(tabId, frameIds); })
+        .catch(function () { return null; });
     }
-    Promise.all(lookups)
-      .then(function (frameIds) { return collectFrames(tabId, frameIds); })
-      .then(sendResponse, function () { sendResponse({ urls: [], links: [], text: '' }); });
+    read
+      .then(function (remote) { return decide(msg, remote, pageHost); })
+      .then(sendResponse, function () { sendResponse(null); });
     return true; // answering asynchronously
   }
 

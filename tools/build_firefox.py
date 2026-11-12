@@ -2,7 +2,8 @@
 """Build the Firefox add-on (default: dist/antivertising-firefox-<version>.zip).
 
 Firefox runs the same code as Chrome. Only the manifest differs:
-  - the background code is an event page, not a service worker;
+  - the background code is an event page, not a service worker, and lists
+    the scripts that Chrome's worker loads for itself;
   - Chrome-only keys go, and Firefox's own settings (the add-on's ID, the
     oldest Firefox it runs on, where to look for updates) come in.
 
@@ -20,6 +21,7 @@ There are two builds, because Mozilla hands the add-on out two ways:
 """
 import argparse
 import json
+import re
 import zipfile
 from pathlib import Path
 
@@ -45,12 +47,24 @@ def version(listed=False):
     return number + ".1" if listed else number
 
 
+def background_scripts(worker):
+    """Chrome's worker pulls in the brand list and engine with importScripts().
+    Firefox's background page cannot, so it is given the same files, in the
+    same order, ahead of the worker itself."""
+    source = (EXT / worker).read_text()
+    call = re.search(r"importScripts\((.*?)\);", source, re.S)
+    if not call:
+        raise SystemExit("%s no longer calls importScripts()" % worker)
+    folder = Path(worker).parent
+    return [(folder / name).as_posix() for name in re.findall(r"'([^']+)'", call.group(1))] + [worker]
+
+
 def firefox_manifest(listed=False):
     manifest = json.loads((EXT / "manifest.json").read_text())
     for chrome_only in ("key", "minimum_chrome_version"):
         manifest.pop(chrome_only, None)
     manifest["version"] = version(listed)
-    manifest["background"] = {"scripts": [manifest["background"]["service_worker"]]}
+    manifest["background"] = {"scripts": background_scripts(manifest["background"]["service_worker"])}
     # Firefox lets people withhold site access from an add-on. Asking for it
     # by name puts it in the install prompt, so it is granted from the start.
     manifest["host_permissions"] = ["http://*/*", "https://*/*"]

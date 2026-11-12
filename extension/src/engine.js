@@ -6,7 +6,7 @@
 (function (root) {
   'use strict';
 
-  // data.js is the hand-written core; data-more.js and data-new.js add the long list.
+  // data.js is the hand-written core; the other data-*.js files add the long list.
   var DATA = root.AV_DATA || (typeof require === 'function' ? require('./data.js') : null);
 
   // How much a counter-ad hurts, on the same 1-10 scale as nemesis.damage.
@@ -38,10 +38,21 @@
 
   // ---- index ---------------------------------------------------------------
 
+  /*
+   * The bank holds thousands of brands and every ad is checked against all of
+   * them, several times as it loads, so the index is built for looking up, not
+   * for scanning:
+   *   domains  a table from site to brand
+   *   aliases  names to look for in ad text, longest first, and `starts`, a
+   *            table from a name's first two characters to the names that
+   *            begin with them, so only names that could be in a text are tried
+   */
   function buildIndex(data) {
-    var brands = {};
-    var domains = [];
-    var labels = {};
+    // Tables with no inherited keys: a site called constructor.io must not
+    // find Object's own "constructor".
+    var brands = Object.create(null);
+    var domains = Object.create(null);
+    var labels = Object.create(null);
     var aliases = [];
     var keywords = [];
 
@@ -53,7 +64,7 @@
         brands[brand.id] = brand;
         brand.domains.forEach(function (d) {
           d = d.toLowerCase();
-          domains.push({ domain: d, brand: brand });
+          if (!domains[d]) domains[d] = brand;
           // A distinctive name is the same advertiser on any country's domain:
           // ikea.com, ikea.jp, ikea.co.uk. Not for ambiguous names ("strict"),
           // where zoom.co.jp or corona.co.jp is somebody else entirely, and
@@ -67,22 +78,43 @@
         if (!brand.strict) names.push(brand.name);
         names.forEach(function (name) {
           name = normaliseText(name).toLowerCase();
-          if (name) aliases.push({ text: name, re: wordRe(name), brand: brand });
+          if (name) aliases.push({ text: name, re: null, brand: brand });
         });
       });
       (cat.keywords || []).forEach(function (kw) {
         var strong = kw.charAt(0) === '!';
         var phrase = normaliseText(strong ? kw.slice(1) : kw);
-        keywords.push({ re: wordRe(phrase), cat: cat, weight: strong ? 2 : 1 });
+        keywords.push({ text: phrase.toLowerCase(), re: null, cat: cat, weight: strong ? 2 : 1 });
       });
     });
 
-    // Most specific first: "music.apple.com" before "apple.com",
-    // "Uber Eats" before "Uber".
-    domains.sort(function (a, b) { return b.domain.length - a.domain.length; });
+    // Longest first, so that "Uber Eats" is found before "Uber".
     aliases.sort(function (a, b) { return b.text.length - a.text.length; });
+    var starts = Object.create(null);
+    aliases.forEach(function (alias, i) {
+      var key = alias.text.slice(0, 2);
+      (starts[key] = starts[key] || []).push(i);
+    });
 
-    return { brands: brands, domains: domains, labels: labels, aliases: aliases, keywords: keywords, data: data };
+    return { brands: brands, domains: domains, labels: labels, aliases: aliases, starts: starts, keywords: keywords, data: data };
+  }
+
+  // The names that could appear in this text, longest first.
+  function aliasesIn(text, index) {
+    var seen = Object.create(null);
+    var found = [];
+    function take(key) {
+      if (seen[key]) return;
+      seen[key] = true;
+      var list = index.starts[key];
+      if (list) for (var j = 0; j < list.length; j++) found.push(list[j]);
+    }
+    for (var i = 0; i < text.length; i++) {
+      take(text.charAt(i));          // names one character long
+      if (i + 1 < text.length) take(text.substr(i, 2));
+    }
+    found.sort(function (a, b) { return a - b; });
+    return found.map(function (i) { return index.aliases[i]; });
   }
 
   var INDEX = null; // built on first use, after siteOf() below exists
@@ -113,10 +145,12 @@
     return Object.keys(found);
   }
 
+  // Most specific first: "music.apple.com" before "apple.com".
   function brandForHost(host, index) {
-    for (var i = 0; i < index.domains.length; i++) {
-      var d = index.domains[i].domain;
-      if (host === d || host.slice(-(d.length + 1)) === '.' + d) return index.domains[i].brand;
+    var rest = host;
+    while (rest.indexOf('.') !== -1) {
+      if (index.domains[rest]) return index.domains[rest];
+      rest = rest.slice(rest.indexOf('.') + 1);
     }
     return index.labels[siteOf(host).split('.')[0]] || null;
   }
@@ -236,9 +270,16 @@
       if (how === 'domain' || !via[brand.id]) via[brand.id] = how;
     }
 
+    // The page may itself belong to a brand we know: a newspaper, a shop.
+    // Its own boxes, linking to its own pages, are not ads somebody paid for.
+    var pageHost = (signals && signals.pageHost) || '';
+    var ownSite = pageHost ? siteOf(pageHost) : null;
+    var owner = pageHost ? brandForHost(pageHost.toLowerCase().replace(/^www\./, ''), index) : null;
+
     var domainHits = {};
     urls.slice(0, MAX_URLS).forEach(function (url) {
       hostsFromUrl(url).forEach(function (host) {
+        if (ownSite && siteOf(host) === ownSite) return;
         var brand = STORE_HOSTS[host] ? null : brandForHost(host, index);
         if (!brand) return;
         domainHits[brand.id] = (domainHits[brand.id] || 0) + 1;
@@ -250,7 +291,11 @@
     // counted as "Uber".
     var remaining = text;
     var textHits = {};
-    index.aliases.forEach(function (alias) {
+    aliasesIn(text, index).forEach(function (alias) {
+      // The cheap test first: most names that start like something in the
+      // text are not in it.
+      if (remaining.indexOf(alias.text) === -1) return;
+      if (!alias.re) alias.re = wordRe(alias.text);
       alias.re.lastIndex = 0;
       if (!alias.re.test(remaining)) return;
       alias.re.lastIndex = 0;
@@ -271,6 +316,10 @@
     if (landing.house && (!best || via[best] !== 'domain')) {
       return { brand: null, category: null, score: 0, via: null, domain: null, house: true };
     }
+    // The site advertising itself on its own pages, wherever the link goes.
+    if (best && owner && owner.id === best) {
+      return { brand: null, category: null, score: 0, via: null, domain: null, house: true };
+    }
 
     if (best) {
       var brand = index.brands[best];
@@ -280,6 +329,8 @@
     // No brand: fall back to what kind of thing is being sold.
     var catScores = {};
     index.keywords.forEach(function (kw) {
+      if (text.indexOf(kw.text) === -1) return;
+      if (!kw.re) kw.re = wordRe(kw.text);
       kw.re.lastIndex = 0;
       if (kw.re.test(text)) catScores[kw.cat.id] = (catScores[kw.cat.id] || 0) + kw.weight;
     });
@@ -310,7 +361,9 @@
       color: brand.color,
       line: brand.line.replace(/\{orig\}/g, origName),
       cta: 'Try ' + brand.name + ' instead',
-      url: brand.url || 'https://' + (siteOf(brand.domains[0]) === brand.domains[0] ? 'www.' : '') + brand.domains[0] + '/',
+      // The bare domain, not "www.": a forgotten www record is the one that
+      // ends up pointing at a stranger's site. data.js lists the exceptions.
+      url: brand.url || 'https://' + brand.domains[0] + '/',
       original: original ? original.name : domain || null,
       category: null,
       damage: damage

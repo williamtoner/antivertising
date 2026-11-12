@@ -813,7 +813,7 @@
     ]
   };
 
-  // ---- compact rows for the long list (data-more.js, data-new.js) ------------
+  // ---- compact rows for the long list (the other data-*.js files) -------------
   // The brands above each have a hand-written pitch. The long list would be
   // unmaintainable that way, so its brands are one row each and borrow one of
   // these stock pitches. {name} is the brand doing the replacing.
@@ -836,12 +836,18 @@
     return s ? String(s).split(sep).filter(Boolean) : [];
   }
 
+  // Brands by id, for the helpers below that add to a brand defined earlier.
+  // Built on first use, then kept up to date by rows.add().
+  var byId = null;
   function find(brandId) {
-    for (var catId in categories) {
-      var list = categories[catId].brands;
-      for (var i = 0; i < list.length; i++) if (list[i].id === brandId) return list[i];
+    if (!byId) {
+      byId = Object.create(null);
+      for (var catId in categories) {
+        categories[catId].brands.forEach(function (brand) { byId[brand.id] = brand; });
+      }
     }
-    throw new Error('no such brand: ' + brandId);
+    if (!byId[brandId]) throw new Error('no such brand: ' + brandId);
+    return byId[brandId];
   }
 
   var rows = {
@@ -860,6 +866,7 @@
       brands.forEach(function (brand) {
         if (cat.noRival) { brand.line = ''; delete brand.arch; }
         cat.brands.push(brand);
+        if (byId) byId[brand.id] = brand;
       });
     },
     // A whole new category: { label, keywords, nemesis, noRival }.
@@ -880,6 +887,14 @@
     dom: function (brandId, domains) {
       var brand = find(brandId);
       brand.domains = brand.domains.concat(split(domains, ' '));
+    },
+    // A card links to its brand's bare domain. These are the brands whose
+    // site only answers with "www." in front.
+    www: function (brandIds) {
+      split(brandIds, ' ').forEach(function (brandId) {
+        var brand = find(brandId);
+        brand.url = 'https://www.' + brand.domains[0] + '/';
+      });
     }
   };
 
@@ -887,8 +902,12 @@
   root.AV_DATA = data;
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = data;
-    // In the browser the manifest loads these two next.
+    // In the browser the manifest loads these next.
     require('./data-more.js');
     require('./data-new.js');
+    require('./data-wide.js');
+    require('./data-jp.js');
+    require('./data-us.js');
+    require('./data-world.js');
   }
 })(typeof globalThis !== 'undefined' ? globalThis : this);

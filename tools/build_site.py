@@ -22,7 +22,10 @@ from pathlib import Path
 import build_firefox
 
 ROOT = Path(__file__).resolve().parent.parent
-ENGINE = ["data.js", "data-more.js", "data-new.js", "engine.js", "card.js"]
+ENGINE = [
+    "data.js", "data-more.js", "data-new.js", "data-wide.js", "data-jp.js", "data-us.js", "data-world.js",
+    "engine.js", "card.js",
+]
 # Where the signed add-on is fetched from when Firefox updates it.
 XPI_URL = "https://williamtoner.github.io/antivertising/antivertising.xpi"
 
